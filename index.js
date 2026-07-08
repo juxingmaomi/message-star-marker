@@ -1,18 +1,19 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.4.1
+// version: v0.4.2
 // description: 在 AI 消息楼层的三点按钮旁添加星星和爱心，可点亮/取消；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.4.1';
-  const BUTTON_NAME = '星心刷新';
+  const SCRIPT_VERSION = 'v0.4.2';
+  const BUTTON_NAME = '星心列表';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
   const BADGE_ID = 'th-message-star-marker-loaded-badge';
+  const PANEL_ID = 'th-message-star-marker-panel';
   const BUTTON_CLASS = 'th-message-marker-btn';
   const ACTIVE_CLASS = 'th-message-marker-active';
   const EXTRA_KEY = 'thMessageMarker';
@@ -104,6 +105,22 @@
     if (type === 'error') console.error(`[${SCRIPT_NAME}] ${message}`);
     else if (type === 'warning') console.warn(`[${SCRIPT_NAME}] ${message}`);
     else console.log(`[${SCRIPT_NAME}] ${message}`);
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function decodeHtmlEntities(value) {
+    const doc = getHostDocument();
+    const textarea = doc.createElement('textarea');
+    textarea.innerHTML = String(value || '');
+    return textarea.value;
   }
 
   function isElementVisible(element) {
@@ -280,6 +297,88 @@
     return value === true;
   }
 
+  function isMarkerValueActive(value) {
+    if (value && typeof value === 'object') return value.marked !== false;
+    return value === true;
+  }
+
+  function getRecordMarker(record) {
+    return record && record.extra && record.extra[EXTRA_KEY] && typeof record.extra[EXTRA_KEY] === 'object'
+      ? record.extra[EXTRA_KEY]
+      : {};
+  }
+
+  function getRecordText(record) {
+    if (!record) return '';
+    const swipeIndex = Number(record.swipe_id);
+    if (Array.isArray(record.swipes) && Number.isInteger(swipeIndex) && typeof record.swipes[swipeIndex] === 'string') {
+      return record.swipes[swipeIndex];
+    }
+    return String(record.mes || record.message || record.text || '');
+  }
+
+  function getSceneTitle(record) {
+    const text = getRecordText(record);
+    const match = /<\s*Scene_Title\s*>([\s\S]*?)<\s*\/\s*Scene_Title\s*>/i.exec(text);
+    if (!match) return '';
+    return decodeHtmlEntities(match[1]).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  }
+
+  function collectMarkedItems(filterType) {
+    const context = getTavernContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const filter = MARKERS.some((marker) => marker.type === filterType) ? filterType : 'all';
+    return chat.reduce((items, record, index) => {
+      const markerState = getRecordMarker(record);
+      const activeMarkers = MARKERS.filter((marker) => isMarkerValueActive(markerState[marker.type]));
+      if (!activeMarkers.length) return items;
+      if (filter !== 'all' && !activeMarkers.some((marker) => marker.type === filter)) return items;
+      items.push({
+        index,
+        floor: index + 1,
+        title: getSceneTitle(record),
+        markers: activeMarkers,
+      });
+      return items;
+    }, []);
+  }
+
+  function findMessageNodeByIndex(index) {
+    const numericIndex = Number(index);
+    if (!Number.isInteger(numericIndex)) return null;
+    return getMessageNodes().find((node) => getMessageIndex(node) === numericIndex) || null;
+  }
+
+  function jumpToMessage(index) {
+    scanMessages();
+    const node = findMessageNodeByIndex(index);
+    if (!node) {
+      notify('warning', `没有找到第 ${Number(index) + 1} 楼。`);
+      return;
+    }
+    try {
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (error) {
+      node.scrollIntoView();
+    }
+    node.classList.add('th-message-marker-jump-highlight');
+    setTimeout(() => node.classList.remove('th-message-marker-jump-highlight'), 1600);
+  }
+
+  function removeRecordMarker(index, markerType) {
+    const context = getTavernContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const numericIndex = Number(index);
+    const record = Number.isInteger(numericIndex) ? chat[numericIndex] : null;
+    if (!record || !record.extra || !record.extra[EXTRA_KEY]) return;
+    delete record.extra[EXTRA_KEY][markerType];
+    if (!record.extra[EXTRA_KEY].star && !record.extra[EXTRA_KEY].heart) {
+      delete record.extra[EXTRA_KEY];
+    }
+    saveChat();
+    scanMessages();
+  }
+
   function syncButton(button, node, marker) {
     const active = isMarked(node, marker.type);
     button.classList.toggle(ACTIVE_CLASS, active);
@@ -414,6 +513,137 @@
         opacity: 1;
         text-shadow: 0 0 5px currentColor;
       }
+      .th-message-marker-jump-highlight {
+        outline: 2px solid rgba(242, 169, 0, 0.72) !important;
+        outline-offset: 3px !important;
+        transition: outline-color 0.2s ease;
+      }
+      #${PANEL_ID} {
+        position: fixed;
+        right: 14px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
+        z-index: 2147483646;
+        width: min(340px, calc(100vw - 24px));
+        max-height: min(520px, calc(100vh - 96px));
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid rgba(120, 150, 140, 0.45);
+        border-radius: 10px;
+        background: rgba(22, 30, 27, 0.96);
+        color: #edf6ef;
+        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.26);
+        font-family: Arial, "Microsoft YaHei", sans-serif;
+      }
+      #${PANEL_ID} * {
+        box-sizing: border-box;
+      }
+      .th-message-marker-panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(120, 150, 140, 0.25);
+      }
+      .th-message-marker-panel-title {
+        font-size: 14px;
+        font-weight: 800;
+      }
+      .th-message-marker-panel-close {
+        width: 28px;
+        height: 28px;
+        border: 0;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.08);
+        color: inherit;
+        cursor: pointer;
+        font-size: 18px;
+        line-height: 1;
+      }
+      .th-message-marker-panel-tabs {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        padding: 10px 12px 6px;
+      }
+      .th-message-marker-panel-tab {
+        height: 30px;
+        border: 1px solid rgba(120, 150, 140, 0.36);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.05);
+        color: inherit;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .th-message-marker-panel-tab[aria-pressed="true"] {
+        border-color: rgba(242, 169, 0, 0.7);
+        background: rgba(242, 169, 0, 0.14);
+      }
+      .th-message-marker-panel-list {
+        display: grid;
+        gap: 6px;
+        min-height: 0;
+        overflow: auto;
+        padding: 8px 12px 12px;
+      }
+      .th-message-marker-panel-empty {
+        padding: 18px 8px;
+        color: rgba(237, 246, 239, 0.68);
+        text-align: center;
+        font-size: 13px;
+      }
+      .th-message-marker-panel-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 8px;
+        min-height: 38px;
+        padding: 6px 8px;
+        border: 1px solid rgba(120, 150, 140, 0.22);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.045);
+      }
+      .th-message-marker-panel-jump {
+        min-width: 0;
+        height: 30px;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        text-align: left;
+        font-size: 14px;
+        font-weight: 700;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .th-message-marker-panel-title-text {
+        color: rgba(237, 246, 239, 0.72);
+        font-weight: 600;
+      }
+      .th-message-marker-panel-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .th-message-marker-panel-remove {
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--th-marker-active-color);
+        cursor: pointer;
+        font-size: 18px;
+        font-weight: 800;
+        line-height: 1;
+      }
+      .th-message-marker-panel-remove:hover,
+      .th-message-marker-panel-close:hover,
+      .th-message-marker-panel-jump:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
       #${BADGE_ID} {
         position: fixed;
         right: 8px;
@@ -443,6 +673,86 @@
     }, 6500);
   }
 
+  function closeMarkerPanel() {
+    const panel = getHostDocument().getElementById(PANEL_ID);
+    if (panel) panel.remove();
+  }
+
+  function buildPanelHtml(filterType) {
+    const filter = MARKERS.some((marker) => marker.type === filterType) ? filterType : 'all';
+    const items = collectMarkedItems(filter);
+    const tabs = [
+      { type: 'all', label: '全部' },
+      { type: 'star', label: '星标' },
+      { type: 'heart', label: '爱心' },
+    ];
+    const listHtml = items.length
+      ? items.map((item) => {
+        const actions = item.markers.map((marker) => (
+          `<button type="button" class="th-message-marker-panel-remove" data-action="remove-marker" data-index="${item.index}" data-marker-type="${marker.type}" style="--th-marker-active-color:${marker.activeColor}" title="取消${marker.symbol}" aria-label="取消${marker.symbol}">${marker.symbol}</button>`
+        )).join('');
+        return `
+          <div class="th-message-marker-panel-item">
+            <button type="button" class="th-message-marker-panel-jump" data-action="jump-marker" data-index="${item.index}">
+              <span class="th-message-marker-panel-floor">第 ${item.floor} 楼</span>
+              ${item.title ? `<span class="th-message-marker-panel-title-text"> · ${escapeHtml(item.title)}</span>` : ''}
+            </button>
+            <div class="th-message-marker-panel-actions">${actions}</div>
+          </div>`;
+      }).join('')
+      : '<div class="th-message-marker-panel-empty">当前筛选没有标记楼层</div>';
+
+    return `
+      <div class="th-message-marker-panel-head">
+        <div class="th-message-marker-panel-title">星心列表</div>
+        <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭">×</button>
+      </div>
+      <div class="th-message-marker-panel-tabs">
+        ${tabs.map((tab) => `<button type="button" class="th-message-marker-panel-tab" data-action="filter-marker" data-filter="${tab.type}" aria-pressed="${tab.type === filter ? 'true' : 'false'}">${tab.label}</button>`).join('')}
+      </div>
+      <div class="th-message-marker-panel-list">${listHtml}</div>`;
+  }
+
+  function renderMarkerPanel(filterType) {
+    const doc = getHostDocument();
+    if (!doc.body) return null;
+    let panel = doc.getElementById(PANEL_ID);
+    if (!panel) {
+      panel = doc.createElement('div');
+      panel.id = PANEL_ID;
+      panel.addEventListener('click', (event) => {
+        const actionNode = event.target && event.target.closest ? event.target.closest('[data-action]') : null;
+        if (!actionNode || !panel.contains(actionNode)) return;
+        const action = actionNode.dataset.action;
+        if (action === 'close-marker-panel') {
+          closeMarkerPanel();
+        } else if (action === 'filter-marker') {
+          panel.dataset.filter = actionNode.dataset.filter || 'all';
+          panel.innerHTML = buildPanelHtml(panel.dataset.filter);
+        } else if (action === 'jump-marker') {
+          jumpToMessage(actionNode.dataset.index);
+        } else if (action === 'remove-marker') {
+          removeRecordMarker(actionNode.dataset.index, actionNode.dataset.markerType);
+          panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
+        }
+      });
+      doc.body.appendChild(panel);
+    }
+    panel.dataset.filter = filterType || panel.dataset.filter || 'all';
+    panel.innerHTML = buildPanelHtml(panel.dataset.filter);
+    return panel;
+  }
+
+  function toggleMarkerPanel() {
+    scanMessages();
+    const existing = getHostDocument().getElementById(PANEL_ID);
+    if (existing) {
+      existing.remove();
+      return;
+    }
+    renderMarkerPanel('all');
+  }
+
   function installObserver() {
     const root = getChatContainer();
     if (!root) return;
@@ -467,6 +777,8 @@
     if (style) style.remove();
     const badge = doc.getElementById(BADGE_ID);
     if (badge) badge.remove();
+    const panel = doc.getElementById(PANEL_ID);
+    if (panel) panel.remove();
   }
 
   function stopInstance() {
@@ -498,6 +810,7 @@
       fallbackMarks: previous && previous.fallbackMarks || {},
       stop: stopInstance,
       refresh: scanMessages,
+      openList: () => renderMarkerPanel('all'),
       getMarkedRecords: () => {
         const context = getTavernContext();
         const chat = context && Array.isArray(context.chat) ? context.chat : [];
@@ -510,9 +823,7 @@
 
   function registerTavernHelperButton() {
     const handler = () => {
-      scanMessages();
-      const count = getMessageNodes().filter(isAssistantMessage).length;
-      notify(count ? 'success' : 'warning', count ? `已刷新星心按钮：找到 ${count} 个 AI 楼层` : '已运行，但没有找到 AI 楼层。');
+      toggleMarkerPanel();
     };
     try {
       if (typeof appendInexistentScriptButtons === 'function') {
