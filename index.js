@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.4.4
+// version: v0.4.5
 // description: 在 AI 消息楼层的三点按钮旁添加星星和爱心，可点亮/取消；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.4.4';
+  const SCRIPT_VERSION = 'v0.4.5';
   const BUTTON_NAME = '星心面板';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
@@ -350,13 +350,8 @@
     return getMessageNodes().find((node) => getMessageIndex(node) === numericIndex) || null;
   }
 
-  function jumpToMessage(index) {
-    scanMessages();
-    const node = findMessageNodeByIndex(index);
-    if (!node) {
-      notify('warning', `没有找到第 ${Number(index) + 1} 楼。`);
-      return;
-    }
+  function highlightMessageNode(node) {
+    if (!node) return false;
     try {
       node.scrollIntoView({ behavior: 'smooth', block: 'center' });
     } catch (error) {
@@ -364,6 +359,42 @@
     }
     node.classList.add('th-message-marker-jump-highlight');
     setTimeout(() => node.classList.remove('th-message-marker-jump-highlight'), 1600);
+    return true;
+  }
+
+  function jumpToMessage(index) {
+    const numericIndex = Number(index);
+    if (!Number.isInteger(numericIndex)) return;
+
+    scanMessages();
+    if (highlightMessageNode(findMessageNodeByIndex(numericIndex))) return;
+
+    const th = getTavernHelper();
+    if (!th || typeof th.triggerSlash !== 'function') {
+      notify('warning', `这一楼还没有加载到页面里，也没有找到酒馆跳转接口。`);
+      return;
+    }
+
+    try {
+      th.triggerSlash(`/chat-jump ${numericIndex}`);
+      notify('info', `正在请求加载第 ${numericIndex + 1} 楼...`);
+    } catch (error) {
+      console.warn(`[${SCRIPT_NAME}] chat-jump 调用失败`, error);
+      notify('warning', `请求跳转失败：${error.message || error}`);
+      return;
+    }
+
+    [500, 1000, 1800, 3000, 4500].forEach((delay, delayIndex, delays) => {
+      setTimeout(() => {
+        scanMessages();
+        const found = findMessageNodeByIndex(numericIndex);
+        if (found) {
+          highlightMessageNode(found);
+        } else if (delayIndex === delays.length - 1) {
+          notify('warning', `已经请求跳转，但酒馆仍未加载到第 ${numericIndex + 1} 楼。`);
+        }
+      }, delay);
+    });
   }
 
   function removeRecordMarker(index, markerType) {
