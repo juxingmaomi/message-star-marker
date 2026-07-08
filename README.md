@@ -39,7 +39,7 @@ const VERSION = 'v0.4.1';
 loader 会加载：
 
 ```js
-https://gcore.jsdelivr.net/gh/juxingmaomi/message-star-marker@v0.4.1/index.js
+https://cdn.jsdelivr.net/gh/juxingmaomi/message-star-marker@v0.4.1/index.js
 ```
 
 ## 控制台接口
