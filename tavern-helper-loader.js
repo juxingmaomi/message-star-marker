@@ -1,6 +1,6 @@
 (async () => {
   const REPO = 'juxingmaomi/message-star-marker';
-  const VERSION = 'v0.4.1';
+  const VERSION = 'v0.4.2';
   const URL = `https://cdn.jsdelivr.net/gh/${REPO}@${VERSION}/index.js`;
 
   const loaderState = {
@@ -37,7 +37,7 @@
   try {
     await import(URL);
     loaderState.loadedAt = new Date().toISOString();
-    popup('success', `楼层星心标记已加载 ${VERSION}`);
+    popup('success', `楼层星心标记已加�?${VERSION}`);
   } catch (error) {
     loaderState.error = String(error && error.message || error);
     console.error('[message-star-marker] Load failed.', error);
