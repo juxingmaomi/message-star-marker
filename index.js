@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.4.5
+// version: v0.4.6
 // description: 在 AI 消息楼层的三点按钮旁添加星星和爱心，可点亮/取消；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.4.5';
+  const SCRIPT_VERSION = 'v0.4.6';
   const BUTTON_NAME = '星心面板';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
@@ -30,6 +30,7 @@
     saveTimers: new Map(),
     weakIds: new WeakMap(),
     nextWeakId: 1,
+    activeRange: null,
     stopping: false,
   };
 
@@ -147,6 +148,84 @@
     const nodes = Array.from(root.querySelectorAll('.mes'));
     if (nodes.length) return nodes.filter((node) => node.isConnected);
     return Array.from(root.querySelectorAll('[data-message-id], .message')).filter((node) => node.isConnected);
+  }
+
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function getChatScrollElement() {
+    const chat = getChatContainer();
+    if (!chat) return null;
+    const wrapper = chat.closest && chat.closest('.simplebar-content-wrapper');
+    if (wrapper) {
+      try {
+        wrapper.style.overscrollBehavior = 'contain';
+      } catch (error) {
+        // Best effort only.
+      }
+      return wrapper;
+    }
+    const inner = chat.querySelector && chat.querySelector('.simplebar-content-wrapper');
+    return inner || chat;
+  }
+
+  function captureWindowScroll() {
+    const host = getHostWindow();
+    try {
+      const doc = host.document;
+      const scroller = doc.scrollingElement || doc.documentElement;
+      return {
+        x: (typeof host.scrollX === 'number' ? host.scrollX : scroller.scrollLeft) || 0,
+        y: (typeof host.scrollY === 'number' ? host.scrollY : scroller.scrollTop) || 0,
+      };
+    } catch (error) {
+      return { x: 0, y: 0 };
+    }
+  }
+
+  function restoreWindowScroll(position) {
+    if (!position) return;
+    const host = getHostWindow();
+    try {
+      host.scrollTo({ left: position.x, top: position.y, behavior: 'auto' });
+    } catch (error) {
+      // Ignore scroll correction failures.
+    }
+  }
+
+  function restoreWindowScrollStable(position) {
+    restoreWindowScroll(position);
+    const host = getHostWindow();
+    try {
+      host.requestAnimationFrame(() => restoreWindowScroll(position));
+    } catch (error) {
+      // Ignore.
+    }
+    setTimeout(() => restoreWindowScroll(position), 80);
+  }
+
+  function scrollMessageInChat(node, block, behavior) {
+    const scrollElement = getChatScrollElement();
+    if (!node || !scrollElement) return false;
+    try {
+      const viewport = scrollElement.getBoundingClientRect();
+      const rect = node.getBoundingClientRect();
+      let targetTop = scrollElement.scrollTop;
+      if (block === 'end') targetTop += rect.bottom - viewport.bottom;
+      else if (block === 'center') targetTop += rect.top - viewport.top - (viewport.height - rect.height) / 2;
+      else targetTop += rect.top - viewport.top;
+      const maxTop = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+      targetTop = Math.max(0, Math.min(maxTop, targetTop));
+      if (typeof scrollElement.scrollTo === 'function') {
+        scrollElement.scrollTo({ top: targetTop, behavior: behavior || 'smooth' });
+      } else {
+        scrollElement.scrollTop = targetTop;
+      }
+      return true;
+    } catch (error) {
+      return false;
+    }
   }
 
   function getRawMesid(node) {
@@ -352,49 +431,163 @@
 
   function highlightMessageNode(node) {
     if (!node) return false;
-    try {
-      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    } catch (error) {
-      node.scrollIntoView();
+    const winPosition = captureWindowScroll();
+    if (!scrollMessageInChat(node, 'center', 'smooth')) {
+      try {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (error) {
+        node.scrollIntoView();
+      }
     }
+    restoreWindowScrollStable(winPosition);
+    scanMessages();
     node.classList.add('th-message-marker-jump-highlight');
     setTimeout(() => node.classList.remove('th-message-marker-jump-highlight'), 1600);
     return true;
   }
 
-  function jumpToMessage(index) {
+  async function waitForMessageElement(index, timeoutMs) {
+    const numericIndex = Number(index);
+    if (!Number.isInteger(numericIndex)) return null;
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const node = findMessageNodeByIndex(numericIndex);
+      if (node) return node;
+      await sleep(50);
+    }
+    return null;
+  }
+
+  async function tryNativeChatJump(index) {
+    const numericIndex = Number(index);
+    if (!Number.isInteger(numericIndex)) return false;
+    const host = getHostWindow();
+    try {
+      const command = host.SillyTavern && host.SillyTavern.SlashCommandParser
+        && host.SillyTavern.SlashCommandParser.commands
+        && host.SillyTavern.SlashCommandParser.commands['chat-jump'];
+      if (command && typeof command.callback === 'function') {
+        await Promise.resolve(command.callback({}, String(numericIndex)));
+        return true;
+      }
+    } catch (error) {
+      console.warn(`[${SCRIPT_NAME}] 原生 chat-jump 调用失败`, error);
+    }
+
+    const th = getTavernHelper();
+    if (th && typeof th.triggerSlash === 'function') {
+      try {
+        await Promise.resolve(th.triggerSlash(`/chat-jump ${numericIndex}`));
+        return true;
+      } catch (error) {
+        console.warn(`[${SCRIPT_NAME}] TavernHelper chat-jump 调用失败`, error);
+      }
+    }
+
+    return false;
+  }
+
+  function getRangeForIndex(index) {
+    const context = getTavernContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const numericIndex = Number(index);
+    if (!Number.isInteger(numericIndex) || numericIndex < 0 || numericIndex >= chat.length) return null;
+    const contextSize = 28;
+    return {
+      start: Math.max(0, numericIndex - contextSize),
+      end: Math.min(chat.length - 1, numericIndex + contextSize),
+      jumpTo: numericIndex,
+    };
+  }
+
+  async function renderRangeAroundMessage(index) {
+    const context = getTavernContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const chatElement = getChatContainer();
+    const doc = getHostDocument();
+    const range = getRangeForIndex(index);
+    if (!range || !chatElement || chatElement === doc.body || !context || typeof context.addOneMessage !== 'function') return false;
+
+    const winPosition = captureWindowScroll();
+    chatElement.replaceChildren();
+    for (let i = range.start; i <= range.end; i += 1) {
+      context.addOneMessage(chat[i], { forceId: i });
+    }
+
+    runtime.activeRange = range;
+    await sleep(80);
+    scanMessages();
+    const node = await waitForMessageElement(range.jumpTo, 2000);
+    if (node) {
+      scrollMessageInChat(node, 'start', 'auto');
+      await sleep(50);
+      highlightMessageNode(node);
+    } else {
+      const scrollElement = getChatScrollElement();
+      if (scrollElement && typeof scrollElement.scrollTo === 'function') scrollElement.scrollTo({ top: 0, behavior: 'auto' });
+    }
+    restoreWindowScrollStable(winPosition);
+    const panel = getHostDocument().getElementById(PANEL_ID);
+    if (panel) panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
+    notify('success', `已临时显示第 ${range.start + 1}-${range.end + 1} 楼，并定位到第 ${range.jumpTo + 1} 楼。`);
+    return true;
+  }
+
+  async function restoreDefaultChatView() {
+    if (!runtime.activeRange) {
+      notify('info', '当前已经是完整聊天视图。');
+      return true;
+    }
+    const host = getHostWindow();
+    const previousRange = runtime.activeRange;
+    runtime.activeRange = null;
+    try {
+      if (host.SillyTavern && typeof host.SillyTavern.reloadCurrentChat === 'function') {
+        await Promise.resolve(host.SillyTavern.reloadCurrentChat());
+      } else {
+        const context = getTavernContext();
+        if (context && typeof context.reloadCurrentChat === 'function') {
+          await Promise.resolve(context.reloadCurrentChat());
+        } else {
+          runtime.activeRange = previousRange;
+          notify('warning', '当前环境没有提供恢复完整聊天视图的接口，可以重新打开本聊天来恢复。');
+          return false;
+        }
+      }
+      await sleep(300);
+      scanMessages();
+      const panel = getHostDocument().getElementById(PANEL_ID);
+      if (panel) panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
+      notify('success', '已恢复完整聊天视图。');
+      return true;
+    } catch (error) {
+      runtime.activeRange = previousRange;
+      notify('warning', `恢复完整聊天视图失败：${error.message || error}`);
+      return false;
+    }
+  }
+
+  async function jumpToMessage(index) {
     const numericIndex = Number(index);
     if (!Number.isInteger(numericIndex)) return;
 
     scanMessages();
     if (highlightMessageNode(findMessageNodeByIndex(numericIndex))) return;
 
-    const th = getTavernHelper();
-    if (!th || typeof th.triggerSlash !== 'function') {
-      notify('warning', `这一楼还没有加载到页面里，也没有找到酒馆跳转接口。`);
+    const winPosition = captureWindowScroll();
+    const jumped = await tryNativeChatJump(numericIndex);
+    restoreWindowScrollStable(winPosition);
+    if (jumped) notify('info', `正在请求加载第 ${numericIndex + 1} 楼...`);
+
+    const found = await waitForMessageElement(numericIndex, 2400);
+    if (found) {
+      highlightMessageNode(found);
       return;
     }
 
-    try {
-      th.triggerSlash(`/chat-jump ${numericIndex}`);
-      notify('info', `正在请求加载第 ${numericIndex + 1} 楼...`);
-    } catch (error) {
-      console.warn(`[${SCRIPT_NAME}] chat-jump 调用失败`, error);
-      notify('warning', `请求跳转失败：${error.message || error}`);
-      return;
-    }
+    if (await renderRangeAroundMessage(numericIndex)) return;
 
-    [500, 1000, 1800, 3000, 4500].forEach((delay, delayIndex, delays) => {
-      setTimeout(() => {
-        scanMessages();
-        const found = findMessageNodeByIndex(numericIndex);
-        if (found) {
-          highlightMessageNode(found);
-        } else if (delayIndex === delays.length - 1) {
-          notify('warning', `已经请求跳转，但酒馆仍未加载到第 ${numericIndex + 1} 楼。`);
-        }
-      }, delay);
-    });
+    notify('warning', `没有找到第 ${numericIndex + 1} 楼，也无法临时渲染目标楼层。`);
   }
 
   function removeRecordMarker(index, markerType) {
@@ -582,6 +775,21 @@
         font-size: 14px;
         font-weight: 800;
       }
+      .th-message-marker-panel-tools {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .th-message-marker-panel-restore {
+        height: 28px;
+        border: 1px solid rgba(120, 150, 140, 0.36);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.07);
+        color: inherit;
+        cursor: pointer;
+        font-size: 12px;
+        white-space: nowrap;
+      }
       .th-message-marker-panel-close {
         width: 28px;
         height: 28px;
@@ -673,6 +881,7 @@
       }
       .th-message-marker-panel-remove:hover,
       .th-message-marker-panel-close:hover,
+      .th-message-marker-panel-restore:hover,
       .th-message-marker-panel-jump:hover {
         background: rgba(255, 255, 255, 0.12);
       }
@@ -752,6 +961,7 @@
   function buildPanelHtml(filterType) {
     const filter = MARKERS.some((marker) => marker.type === filterType) ? filterType : 'all';
     const items = collectMarkedItems(filter);
+    const range = runtime.activeRange;
     const tabs = [
       { type: 'all', label: '全部' },
       { type: 'star', label: '星标' },
@@ -775,8 +985,11 @@
 
     return `
       <div class="th-message-marker-panel-head">
-        <div class="th-message-marker-panel-title">星心列表</div>
-        <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭">×</button>
+        <div class="th-message-marker-panel-title">星心列表${range ? ` · 临时显示 ${range.start + 1}-${range.end + 1} 楼` : ''}</div>
+        <div class="th-message-marker-panel-tools">
+          ${range ? '<button type="button" class="th-message-marker-panel-restore" data-action="restore-chat-view">恢复完整聊天</button>' : ''}
+          <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭">×</button>
+        </div>
       </div>
       <div class="th-message-marker-panel-tabs">
         ${tabs.map((tab) => `<button type="button" class="th-message-marker-panel-tab" data-action="filter-marker" data-filter="${tab.type}" aria-pressed="${tab.type === filter ? 'true' : 'false'}">${tab.label}</button>`).join('')}
@@ -797,6 +1010,8 @@
         const action = actionNode.dataset.action;
         if (action === 'close-marker-panel') {
           closeMarkerPanel();
+        } else if (action === 'restore-chat-view') {
+          restoreDefaultChatView();
         } else if (action === 'filter-marker') {
           panel.dataset.filter = actionNode.dataset.filter || 'all';
           panel.innerHTML = buildPanelHtml(panel.dataset.filter);
