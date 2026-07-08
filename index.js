@@ -1,19 +1,20 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.4.2
+// version: v0.4.4
 // description: 在 AI 消息楼层的三点按钮旁添加星星和爱心，可点亮/取消；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.4.2';
-  const BUTTON_NAME = '星心列表';
+  const SCRIPT_VERSION = 'v0.4.4';
+  const BUTTON_NAME = '星心面板';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
   const BADGE_ID = 'th-message-star-marker-loaded-badge';
   const PANEL_ID = 'th-message-star-marker-panel';
+  const FLOATING_BUTTON_ID = 'th-message-star-marker-floating-button';
   const BUTTON_CLASS = 'th-message-marker-btn';
   const ACTIVE_CLASS = 'th-message-marker-active';
   const EXTRA_KEY = 'thMessageMarker';
@@ -644,6 +645,26 @@
       .th-message-marker-panel-jump:hover {
         background: rgba(255, 255, 255, 0.12);
       }
+      #${FLOATING_BUTTON_ID} {
+        position: fixed;
+        right: 10px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
+        z-index: 2147483645;
+        min-width: 46px;
+        height: 30px;
+        padding: 0 8px;
+        border: 1px solid rgba(120, 150, 140, 0.55);
+        border-radius: 8px;
+        background: rgba(22, 30, 27, 0.88);
+        color: #edf6ef;
+        cursor: pointer;
+        font: 13px/1 Arial, "Microsoft YaHei", sans-serif;
+        opacity: 0.72;
+      }
+      #${FLOATING_BUTTON_ID}:hover {
+        opacity: 1;
+        background: rgba(22, 30, 27, 0.96);
+      }
       #${BADGE_ID} {
         position: fixed;
         right: 8px;
@@ -671,6 +692,25 @@
     setTimeout(() => {
       if (badge && badge.parentNode) badge.remove();
     }, 6500);
+  }
+
+  function ensureFloatingPanelButton() {
+    const doc = getHostDocument();
+    if (!doc.body) return;
+    let button = doc.getElementById(FLOATING_BUTTON_ID);
+    if (!button) {
+      button = doc.createElement('button');
+      button.id = FLOATING_BUTTON_ID;
+      button.type = 'button';
+      button.textContent = '星心';
+      button.title = '打开星心列表';
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleMarkerPanel();
+      });
+      doc.body.appendChild(button);
+    }
   }
 
   function closeMarkerPanel() {
@@ -745,11 +785,6 @@
 
   function toggleMarkerPanel() {
     scanMessages();
-    const existing = getHostDocument().getElementById(PANEL_ID);
-    if (existing) {
-      existing.remove();
-      return;
-    }
     renderMarkerPanel('all');
   }
 
@@ -779,6 +814,8 @@
     if (badge) badge.remove();
     const panel = doc.getElementById(PANEL_ID);
     if (panel) panel.remove();
+    const floatingButton = doc.getElementById(FLOATING_BUTTON_ID);
+    if (floatingButton) floatingButton.remove();
   }
 
   function stopInstance() {
@@ -826,14 +863,11 @@
       toggleMarkerPanel();
     };
     try {
-      if (typeof appendInexistentScriptButtons === 'function') {
+      if (typeof appendInexistentScriptButtons === 'function' && typeof getButtonEvent === 'function' && typeof eventOn === 'function') {
         appendInexistentScriptButtons([{ name: BUTTON_NAME, visible: true }]);
-      }
-      if (typeof eventOnButton === 'function') {
-        eventOnButton(BUTTON_NAME, handler);
-      }
-      if (typeof getButtonEvent === 'function' && typeof eventOn === 'function') {
         eventOn(getButtonEvent(BUTTON_NAME), handler);
+      } else if (typeof eventOnButton === 'function') {
+        eventOnButton(BUTTON_NAME, handler);
       }
     } catch (error) {
       console.warn(`[${SCRIPT_NAME}] 注册酒馆助手按钮失败`, error);
@@ -852,7 +886,8 @@
 
     injectStyle();
     showLoadedBadge();
-    registerTavernHelperButton();
+    ensureFloatingPanelButton();
+    setTimeout(registerTavernHelperButton, 1000);
     installObserver();
     scanMessages();
     [300, 900, 1800, 3500].forEach((delay) => setTimeout(scanMessages, delay));
