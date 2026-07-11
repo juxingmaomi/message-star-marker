@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.4.6
-// description: 在 AI 消息楼层的三点按钮旁添加星星和爱心，可点亮/取消；状态保存到聊天消息 extra 中。
+// version: v0.5.0
+// description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.4.6';
+  const SCRIPT_VERSION = 'v0.5.0';
   const BUTTON_NAME = '星心面板';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
@@ -16,12 +16,15 @@
   const PANEL_ID = 'th-message-star-marker-panel';
   const FLOATING_BUTTON_ID = 'th-message-star-marker-floating-button';
   const BUTTON_CLASS = 'th-message-marker-btn';
+  const FOOTER_CLASS = 'th-message-marker-footer';
   const ACTIVE_CLASS = 'th-message-marker-active';
   const EXTRA_KEY = 'thMessageMarker';
 
   const MARKERS = [
-    { type: 'star', symbol: '★', activeColor: '#f2a900', onTitle: '取消星标', offTitle: '星标未读' },
-    { type: 'heart', symbol: '♥', activeColor: '#df4f73', onTitle: '取消爱心', offTitle: '爱心标记' },
+    { type: 'qa', symbol: '问答', textual: true, activeColor: '#2f91b4', onTitle: '取消问答标记', offTitle: '标记为问答' },
+    { type: 'letter', symbol: '来信', textual: true, activeColor: '#4f9b68', onTitle: '取消来信标记', offTitle: '标记为来信' },
+    { type: 'star', symbol: '★', textual: false, activeColor: '#f2a900', onTitle: '取消星标', offTitle: '星标未读' },
+    { type: 'heart', symbol: '♥', textual: false, activeColor: '#df4f73', onTitle: '取消爱心', offTitle: '爱心标记' },
   ];
 
   const runtime = {
@@ -597,7 +600,7 @@
     const record = Number.isInteger(numericIndex) ? chat[numericIndex] : null;
     if (!record || !record.extra || !record.extra[EXTRA_KEY]) return;
     delete record.extra[EXTRA_KEY][markerType];
-    if (!record.extra[EXTRA_KEY].star && !record.extra[EXTRA_KEY].heart) {
+    if (!MARKERS.some((marker) => isMarkerValueActive(record.extra[EXTRA_KEY][marker.type]))) {
       delete record.extra[EXTRA_KEY];
     }
     saveChat();
@@ -613,19 +616,26 @@
     button.style.setProperty('--th-marker-active-color', marker.activeColor);
   }
 
-  function createButton(node, marker) {
+  function syncMarkerButtons(node, marker) {
+    node.querySelectorAll(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"]`)
+      .forEach((button) => syncButton(button, node, marker));
+  }
+
+  function createButton(node, marker, placement) {
     const doc = getHostDocument();
     const button = doc.createElement('button');
     button.type = 'button';
     button.className = `${BUTTON_CLASS} ${BUTTON_CLASS}-${marker.type}`;
+    if (marker.textual) button.classList.add(`${BUTTON_CLASS}-text`);
     button.dataset.thMessageMarker = marker.type;
+    button.dataset.thMarkerPlacement = placement;
     button.textContent = marker.symbol;
     button.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       const next = !isMarked(node, marker.type);
       setMarker(node, marker.type, next);
-      syncButton(button, node, marker);
+      syncMarkerButtons(node, marker);
     });
     return button;
   }
@@ -673,14 +683,32 @@
 
     const beforeNode = getBeforeNode(container);
     MARKERS.forEach((marker) => {
-      let button = node.querySelector(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"]`);
+      let button = container.querySelector(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"][data-th-marker-placement="top"]`);
       if (!button) {
-        button = createButton(node, marker);
+        button = createButton(node, marker, 'top');
         if (beforeNode && beforeNode.parentNode === container) {
           container.insertBefore(button, beforeNode);
         } else {
           container.appendChild(button);
         }
+      }
+      syncButton(button, node, marker);
+    });
+
+    const footerHost = node.querySelector('.mes_block') || node;
+    let footer = Array.from(footerHost.children || []).find((child) => child.classList && child.classList.contains(FOOTER_CLASS));
+    if (!footer) {
+      footer = getHostDocument().createElement('div');
+      footer.className = FOOTER_CLASS;
+      footer.setAttribute('aria-label', '楼层标记');
+      footerHost.appendChild(footer);
+    }
+
+    MARKERS.forEach((marker) => {
+      let button = footer.querySelector(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"][data-th-marker-placement="bottom"]`);
+      if (!button) {
+        button = createButton(node, marker, 'bottom');
+        footer.appendChild(button);
       }
       syncButton(button, node, marker);
     });
@@ -717,7 +745,7 @@
         border: 0;
         border-radius: 5px;
         background: transparent;
-        color: currentColor;
+        color: #8b9290;
         cursor: pointer;
         font-family: Arial, "Microsoft YaHei", sans-serif;
         font-size: 21px;
@@ -726,10 +754,29 @@
         opacity: 0.42;
         vertical-align: middle;
       }
+      .${BUTTON_CLASS}-text {
+        width: auto;
+        min-width: 42px;
+        padding: 0 6px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .${FOOTER_CLASS} {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 3px;
+        width: 100%;
+        min-height: 34px;
+        margin-top: 8px;
+        padding: 3px 8px 3px 0;
+        box-sizing: border-box;
+      }
       .${BUTTON_CLASS}:hover,
       .${BUTTON_CLASS}:focus-visible {
         background: rgba(245, 183, 66, 0.14);
-        color: var(--th-marker-active-color);
+        color: #8b9290;
         opacity: 0.95;
         outline: none;
       }
@@ -803,7 +850,7 @@
       }
       .th-message-marker-panel-tabs {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(5, 1fr);
         gap: 6px;
         padding: 10px 12px 6px;
       }
@@ -868,7 +915,8 @@
         gap: 4px;
       }
       .th-message-marker-panel-remove {
-        width: 30px;
+        width: auto;
+        min-width: 30px;
         height: 30px;
         border: 0;
         border-radius: 6px;
@@ -964,6 +1012,8 @@
     const range = runtime.activeRange;
     const tabs = [
       { type: 'all', label: '全部' },
+      { type: 'qa', label: '问答' },
+      { type: 'letter', label: '来信' },
       { type: 'star', label: '星标' },
       { type: 'heart', label: '爱心' },
     ];
@@ -1054,6 +1104,7 @@
   function removeOwnedDom() {
     const doc = getHostDocument();
     doc.querySelectorAll(`.${BUTTON_CLASS}`).forEach((node) => node.remove());
+    doc.querySelectorAll(`.${FOOTER_CLASS}`).forEach((node) => node.remove());
     const style = doc.getElementById(STYLE_ID);
     if (style) style.remove();
     const badge = doc.getElementById(BADGE_ID);
@@ -1099,7 +1150,7 @@
         const chat = context && Array.isArray(context.chat) ? context.chat : [];
         return chat
           .map((record, index) => ({ index, marker: record && record.extra && record.extra[EXTRA_KEY] }))
-          .filter((item) => item.marker && (item.marker.star || item.marker.heart));
+          .filter((item) => item.marker && MARKERS.some((marker) => isMarkerValueActive(item.marker[marker.type])));
       },
     };
   }
