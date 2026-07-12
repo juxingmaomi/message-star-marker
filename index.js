@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.5.1
+// version: v0.5.2
 // description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.5.1';
+  const SCRIPT_VERSION = 'v0.5.2';
   const BUTTON_NAME = '星心面板';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
@@ -472,35 +472,6 @@
     return null;
   }
 
-  async function tryNativeChatJump(index) {
-    const numericIndex = Number(index);
-    if (!Number.isInteger(numericIndex)) return false;
-    const host = getHostWindow();
-    try {
-      const command = host.SillyTavern && host.SillyTavern.SlashCommandParser
-        && host.SillyTavern.SlashCommandParser.commands
-        && host.SillyTavern.SlashCommandParser.commands['chat-jump'];
-      if (command && typeof command.callback === 'function') {
-        await Promise.resolve(command.callback({}, String(numericIndex)));
-        return true;
-      }
-    } catch (error) {
-      console.warn(`[${SCRIPT_NAME}] 原生 chat-jump 调用失败`, error);
-    }
-
-    const th = getTavernHelper();
-    if (th && typeof th.triggerSlash === 'function') {
-      try {
-        await Promise.resolve(th.triggerSlash(`/chat-jump ${numericIndex}`));
-        return true;
-      } catch (error) {
-        console.warn(`[${SCRIPT_NAME}] TavernHelper chat-jump 调用失败`, error);
-      }
-    }
-
-    return false;
-  }
-
   function getRangeForIndex(index) {
     const context = getTavernContext();
     const chat = context && Array.isArray(context.chat) ? context.chat : [];
@@ -602,20 +573,10 @@
     scanMessages();
     if (highlightMessageNode(findMessageNodeByIndex(numericIndex))) return;
 
-    const winPosition = captureWindowScroll();
-    const jumped = await tryNativeChatJump(numericIndex);
-    restoreWindowScrollStable(winPosition);
-    if (jumped) notify('info', `正在请求加载第 ${numericIndex + 1} 楼...`);
-
-    const found = await waitForMessageElement(numericIndex, 2400);
-    if (found) {
-      highlightMessageNode(found);
-      return;
-    }
-
+    notify('info', `正在轻量显示第 ${numericIndex + 1} 楼...`);
     if (await renderRangeAroundMessage(numericIndex)) return;
 
-    notify('warning', `没有找到第 ${numericIndex + 1} 楼，也无法临时渲染目标楼层。`);
+    notify('warning', `无法轻量显示第 ${numericIndex + 1} 楼。`);
   }
 
   function removeRecordMarker(index, markerType) {
