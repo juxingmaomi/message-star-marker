@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.5.2
+// version: v0.5.3
 // description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.5.2';
+  const SCRIPT_VERSION = 'v0.5.3';
   const BUTTON_NAME = '星心面板';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
@@ -34,6 +34,7 @@
     weakIds: new WeakMap(),
     nextWeakId: 1,
     activeRange: null,
+    rangeRendering: false,
     stopping: false,
   };
 
@@ -485,14 +486,18 @@
     };
   }
 
-  async function renderRangeAroundMessage(index) {
+  async function renderFloorRange(range) {
     const context = getTavernContext();
     const chat = context && Array.isArray(context.chat) ? context.chat : [];
     const chatElement = getChatContainer();
     const doc = getHostDocument();
-    const range = getRangeForIndex(index);
     if (!range || !chatElement || chatElement === doc.body || !context || typeof context.addOneMessage !== 'function') return false;
+    if (runtime.rangeRendering) {
+      notify('info', '楼层区间正在切换，请稍候。');
+      return false;
+    }
 
+    runtime.rangeRendering = true;
     const winPosition = captureWindowScroll();
     if (runtime.observer) runtime.observer.disconnect();
     try {
@@ -511,6 +516,7 @@
       return false;
     } finally {
       installObserver();
+      runtime.rangeRendering = false;
     }
 
     runtime.activeRange = range;
@@ -530,6 +536,39 @@
     if (panel) panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
     notify('success', `已临时显示第 ${range.start + 1}-${range.end + 1} 楼，并定位到第 ${range.jumpTo + 1} 楼。`);
     return true;
+  }
+
+  async function renderRangeAroundMessage(index) {
+    return renderFloorRange(getRangeForIndex(index));
+  }
+
+  async function moveActiveRange(direction) {
+    const context = getTavernContext();
+    const chat = context && Array.isArray(context.chat) ? context.chat : [];
+    const current = runtime.activeRange;
+    if (!current || !chat.length) return false;
+
+    const pageSize = 7;
+    let start;
+    let end;
+    if (direction === 'previous') {
+      if (current.start <= 0) {
+        notify('info', '已经是最早的一段了。');
+        return false;
+      }
+      end = current.start - 1;
+      start = Math.max(0, end - pageSize + 1);
+    } else {
+      if (current.end >= chat.length - 1) {
+        notify('info', '已经是最新的一段了。');
+        return false;
+      }
+      start = current.end + 1;
+      end = Math.min(chat.length - 1, start + pageSize - 1);
+    }
+
+    notify('info', `正在显示第 ${start + 1}-${end + 1} 楼...`);
+    return renderFloorRange({ start, end, jumpTo: start });
   }
 
   async function restoreDefaultChatView() {
@@ -840,6 +879,33 @@
         gap: 6px;
         padding: 10px 12px 6px;
       }
+      .th-message-marker-range-nav {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px 2px;
+      }
+      .th-message-marker-range-button {
+        height: 30px;
+        border: 1px solid rgba(120, 150, 140, 0.36);
+        border-radius: 7px;
+        background: rgba(255, 255, 255, 0.06);
+        color: inherit;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      .th-message-marker-range-button:disabled {
+        cursor: default;
+        opacity: 0.35;
+      }
+      .th-message-marker-range-value {
+        min-width: 86px;
+        color: rgba(237, 246, 239, 0.76);
+        text-align: center;
+        font-size: 12px;
+        white-space: nowrap;
+      }
       .th-message-marker-panel-tab {
         height: 30px;
         border: 1px solid rgba(120, 150, 140, 0.36);
@@ -916,6 +982,7 @@
       .th-message-marker-panel-remove:hover,
       .th-message-marker-panel-close:hover,
       .th-message-marker-panel-restore:hover,
+      .th-message-marker-range-button:not(:disabled):hover,
       .th-message-marker-panel-jump:hover {
         background: rgba(255, 255, 255, 0.12);
       }
@@ -996,6 +1063,8 @@
     const filter = MARKERS.some((marker) => marker.type === filterType) ? filterType : 'all';
     const items = collectMarkedItems(filter);
     const range = runtime.activeRange;
+    const context = getTavernContext();
+    const chatLength = context && Array.isArray(context.chat) ? context.chat.length : 0;
     const tabs = [
       { type: 'all', label: '全部' },
       { type: 'qa', label: '问答' },
@@ -1027,6 +1096,12 @@
           <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭">×</button>
         </div>
       </div>
+      ${range ? `
+        <div class="th-message-marker-range-nav">
+          <button type="button" class="th-message-marker-range-button" data-action="range-previous" ${range.start <= 0 ? 'disabled' : ''}>‹ 前一段</button>
+          <span class="th-message-marker-range-value">第 ${range.start + 1}-${range.end + 1} 楼</span>
+          <button type="button" class="th-message-marker-range-button" data-action="range-next" ${range.end >= chatLength - 1 ? 'disabled' : ''}>后一段 ›</button>
+        </div>` : ''}
       <div class="th-message-marker-panel-tabs">
         ${tabs.map((tab) => `<button type="button" class="th-message-marker-panel-tab" data-action="filter-marker" data-filter="${tab.type}" aria-pressed="${tab.type === filter ? 'true' : 'false'}">${tab.label}</button>`).join('')}
       </div>
@@ -1048,6 +1123,10 @@
           closeMarkerPanel();
         } else if (action === 'restore-chat-view') {
           restoreDefaultChatView();
+        } else if (action === 'range-previous') {
+          moveActiveRange('previous');
+        } else if (action === 'range-next') {
+          moveActiveRange('next');
         } else if (action === 'filter-marker') {
           panel.dataset.filter = actionNode.dataset.filter || 'all';
           panel.innerHTML = buildPanelHtml(panel.dataset.filter);
