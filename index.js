@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.5.0
+// version: v0.5.1
 // description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.5.0';
+  const SCRIPT_VERSION = 'v0.5.1';
   const BUTTON_NAME = '星心面板';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
@@ -155,6 +155,17 @@
 
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  function yieldToBrowser() {
+    const host = getHostWindow();
+    return new Promise((resolve) => {
+      if (host && typeof host.requestAnimationFrame === 'function') {
+        host.requestAnimationFrame(() => resolve());
+      } else {
+        setTimeout(resolve, 0);
+      }
+    });
   }
 
   function getChatScrollElement() {
@@ -495,7 +506,7 @@
     const chat = context && Array.isArray(context.chat) ? context.chat : [];
     const numericIndex = Number(index);
     if (!Number.isInteger(numericIndex) || numericIndex < 0 || numericIndex >= chat.length) return null;
-    const contextSize = 28;
+    const contextSize = 3;
     return {
       start: Math.max(0, numericIndex - contextSize),
       end: Math.min(chat.length - 1, numericIndex + contextSize),
@@ -512,13 +523,27 @@
     if (!range || !chatElement || chatElement === doc.body || !context || typeof context.addOneMessage !== 'function') return false;
 
     const winPosition = captureWindowScroll();
-    chatElement.replaceChildren();
-    for (let i = range.start; i <= range.end; i += 1) {
-      context.addOneMessage(chat[i], { forceId: i });
+    if (runtime.observer) runtime.observer.disconnect();
+    try {
+      chatElement.replaceChildren();
+      for (let i = range.start; i <= range.end; i += 1) {
+        context.addOneMessage(chat[i], {
+          forceId: i,
+          scroll: false,
+          showSwipes: i === range.end,
+        });
+        await yieldToBrowser();
+      }
+    } catch (error) {
+      console.warn(`[${SCRIPT_NAME}] 轻量楼层渲染失败`, error);
+      notify('warning', `轻量楼层渲染失败：${error.message || error}`);
+      return false;
+    } finally {
+      installObserver();
     }
 
     runtime.activeRange = range;
-    await sleep(80);
+    await yieldToBrowser();
     scanMessages();
     const node = await waitForMessageElement(range.jumpTo, 2000);
     if (node) {
