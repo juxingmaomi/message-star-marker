@@ -1,20 +1,21 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.1
+// version: reader-v0.1.2
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.1';
+  const SCRIPT_VERSION = 'reader-v0.1.2';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
   const BADGE_ID = 'th-message-marker-reader-loaded-badge';
   const PANEL_ID = 'th-message-marker-reader-list';
   const READER_ID = 'th-message-marker-reader';
+  const FLOATING_BUTTON_ID = 'th-message-marker-reader-floating-button';
   const BUTTON_CLASS = 'th-message-marker-btn';
   const FOOTER_CLASS = 'th-message-marker-footer';
   const ACTIVE_CLASS = 'th-message-marker-active';
@@ -33,6 +34,8 @@
     saveTimers: new Map(),
     buttonSubscription: null,
     readerIndex: null,
+    floatingPosition: null,
+    viewportHandler: null,
     stopping: false,
   };
 
@@ -380,6 +383,7 @@
   function scanMessages() {
     if (runtime.stopping) return;
     getMessageNodes().forEach(attachButtons);
+    ensureFloatingButton();
   }
 
   function scheduleScan(delay) {
@@ -448,10 +452,142 @@
     return isMobile ? doc.getElementById('movingDivs') || doc.body : doc.body;
   }
 
+  function getViewportMetrics() {
+    const host = getHostWindow();
+    const viewport = host.visualViewport;
+    return {
+      width: Math.max(1, viewport && viewport.width || host.innerWidth || 1),
+      height: Math.max(1, viewport && viewport.height || host.innerHeight || 1),
+      top: Math.max(0, viewport && viewport.offsetTop || 0),
+    };
+  }
+
+  function clampFloatingButton(button) {
+    if (!button || !runtime.floatingPosition) return;
+    const viewport = getViewportMetrics();
+    const width = button.offsetWidth || 50;
+    const height = button.offsetHeight || 50;
+    runtime.floatingPosition.left = Math.min(Math.max(8, runtime.floatingPosition.left), Math.max(8, viewport.width - width - 8));
+    runtime.floatingPosition.top = Math.min(Math.max(viewport.top + 8, runtime.floatingPosition.top), Math.max(viewport.top + 8, viewport.top + viewport.height - height - 8));
+    button.style.left = `${runtime.floatingPosition.left}px`;
+    button.style.top = `${runtime.floatingPosition.top}px`;
+    button.style.right = 'auto';
+    button.style.bottom = 'auto';
+  }
+
+  function syncViewportMetrics() {
+    const doc = getHostDocument();
+    const viewport = getViewportMetrics();
+    doc.documentElement.style.setProperty('--th-reader-visual-height', `${Math.round(viewport.height)}px`);
+    doc.documentElement.style.setProperty('--th-reader-visual-top', `${Math.round(viewport.top)}px`);
+    clampFloatingButton(doc.getElementById(FLOATING_BUTTON_ID));
+  }
+
+  function bindViewportSync() {
+    if (runtime.viewportHandler) return;
+    const host = getHostWindow();
+    runtime.viewportHandler = () => syncViewportMetrics();
+    host.addEventListener('resize', runtime.viewportHandler, { passive: true });
+    if (host.visualViewport) {
+      host.visualViewport.addEventListener('resize', runtime.viewportHandler, { passive: true });
+      host.visualViewport.addEventListener('scroll', runtime.viewportHandler, { passive: true });
+    }
+    syncViewportMetrics();
+  }
+
+  function unbindViewportSync() {
+    if (!runtime.viewportHandler) return;
+    const host = getHostWindow();
+    host.removeEventListener('resize', runtime.viewportHandler);
+    if (host.visualViewport) {
+      host.visualViewport.removeEventListener('resize', runtime.viewportHandler);
+      host.visualViewport.removeEventListener('scroll', runtime.viewportHandler);
+    }
+    runtime.viewportHandler = null;
+  }
+
+  function updateFloatingButtonVisibility() {
+    const doc = getHostDocument();
+    const button = doc.getElementById(FLOATING_BUTTON_ID);
+    if (!button) return;
+    const overlayOpen = Boolean(doc.getElementById(PANEL_ID) || doc.getElementById(READER_ID));
+    button.style.display = overlayOpen ? 'none' : 'inline-flex';
+  }
+
+  function bindFloatingButton(button) {
+    if (!button || button.dataset.thReaderDragBound === 'true') return;
+    button.dataset.thReaderDragBound = 'true';
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+    let moved = false;
+
+    button.addEventListener('pointerdown', (event) => {
+      if (event.button != null && event.button !== 0) return;
+      const rect = button.getBoundingClientRect();
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      startLeft = rect.left;
+      startTop = rect.top;
+      moved = false;
+      button.setPointerCapture && button.setPointerCapture(pointerId);
+      event.preventDefault();
+    });
+
+    button.addEventListener('pointermove', (event) => {
+      if (pointerId == null || event.pointerId !== pointerId) return;
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      if (!moved && Math.hypot(dx, dy) < 5) return;
+      moved = true;
+      runtime.floatingPosition = { left: startLeft + dx, top: startTop + dy };
+      clampFloatingButton(button);
+      event.preventDefault();
+    });
+
+    const finish = (event) => {
+      if (pointerId == null || event.pointerId !== pointerId) return;
+      button.releasePointerCapture && button.releasePointerCapture(pointerId);
+      pointerId = null;
+      if (!moved) toggleMarkerPanel();
+      event.preventDefault();
+    };
+    button.addEventListener('pointerup', finish);
+    button.addEventListener('pointercancel', () => { pointerId = null; });
+    button.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      toggleMarkerPanel();
+    });
+  }
+
+  function ensureFloatingButton() {
+    const doc = getHostDocument();
+    if (!doc.body) return null;
+    let button = doc.getElementById(FLOATING_BUTTON_ID);
+    if (!button) {
+      button = doc.createElement('button');
+      button.id = FLOATING_BUTTON_ID;
+      button.type = 'button';
+      button.textContent = '🐵';
+      button.title = '打开楼层书签列表';
+      button.setAttribute('aria-label', '打开楼层书签列表');
+      doc.body.appendChild(button);
+      bindFloatingButton(button);
+    }
+    clampFloatingButton(button);
+    updateFloatingButtonVisibility();
+    return button;
+  }
+
   function closeReader() {
     const reader = getHostDocument().getElementById(READER_ID);
     if (reader) reader.remove();
     runtime.readerIndex = null;
+    updateFloatingButtonVisibility();
   }
 
   function renderReader(index) {
@@ -495,6 +631,7 @@
     reader.innerHTML = buildReaderHtml(numericIndex);
     const content = reader.querySelector('.th-message-marker-reader-content');
     if (content) content.scrollTop = 0;
+    updateFloatingButtonVisibility();
     return reader;
   }
 
@@ -506,6 +643,7 @@
   function closeMarkerPanel() {
     const panel = getHostDocument().getElementById(PANEL_ID);
     if (panel) panel.remove();
+    updateFloatingButtonVisibility();
   }
 
   function buildPanelHtml(filterType) {
@@ -569,6 +707,7 @@
     }
     panel.dataset.filter = filterType || panel.dataset.filter || 'all';
     panel.innerHTML = buildPanelHtml(panel.dataset.filter);
+    updateFloatingButtonVisibility();
     return panel;
   }
 
@@ -650,7 +789,9 @@
         box-sizing: border-box;
       }
       #${PANEL_ID},
-      #${READER_ID} {
+      #${READER_ID},
+      #${FLOATING_BUTTON_ID} {
+        box-sizing: border-box;
         color: var(--SmartThemeBodyColor, #edf6ef);
         font-family: Arial, "Microsoft YaHei", sans-serif;
         letter-spacing: 0;
@@ -658,6 +799,38 @@
       #${PANEL_ID} * ,
       #${READER_ID} * {
         box-sizing: border-box;
+      }
+      #${FLOATING_BUTTON_ID} {
+        position: fixed;
+        right: 14px;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 154px);
+        z-index: 2147483645;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 50px;
+        height: 50px;
+        padding: 0;
+        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.58));
+        border-radius: 14px;
+        background: var(--SmartThemeBlurTintColor, rgba(35, 63, 52, 0.94));
+        color: inherit;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+        font-size: 27px;
+        line-height: 1;
+      }
+      #${FLOATING_BUTTON_ID}:active {
+        cursor: grabbing;
+      }
+      #${FLOATING_BUTTON_ID}:hover,
+      #${FLOATING_BUTTON_ID}:focus-visible {
+        background: rgba(55, 93, 76, 0.98);
+        outline: none;
       }
       #${PANEL_ID} {
         position: fixed;
@@ -876,6 +1049,7 @@
         outline: none;
       }
       .th-message-marker-reader-content {
+        flex: 1 1 auto;
         min-height: 180px;
         overflow: auto;
         padding: 18px 20px;
@@ -925,22 +1099,30 @@
         pointer-events: none;
       }
       @media (max-width: 700px) {
+        #${FLOATING_BUTTON_ID} {
+          top: calc(var(--th-reader-visual-top, 0px) + 112px);
+          right: 12px;
+          bottom: auto;
+        }
         #${PANEL_ID} {
           right: 8px;
           bottom: calc(env(safe-area-inset-bottom, 0px) + 126px);
           width: calc(100vw - 16px);
-          max-height: min(540px, calc(100dvh - 150px));
+          max-height: min(540px, calc(var(--th-reader-visual-height, 100dvh) - 150px));
         }
         #${READER_ID} {
+          inset: auto 0 auto 0;
+          top: var(--th-reader-visual-top, 0px);
+          height: var(--th-reader-visual-height, 100dvh);
           padding: 8px;
         }
         .th-message-marker-reader-dialog {
           width: calc(100vw - 16px);
           min-width: 0;
-          max-height: calc(100dvh - 16px);
+          max-height: calc(var(--th-reader-visual-height, 100dvh) - 16px);
         }
         .th-message-marker-reader-content {
-          min-height: 140px;
+          min-height: 0;
           padding: 14px 12px;
         }
         .th-message-marker-reader-nav {
@@ -977,7 +1159,7 @@
     const doc = getHostDocument();
     doc.querySelectorAll(`.${BUTTON_CLASS}`).forEach((node) => node.remove());
     doc.querySelectorAll(`.${FOOTER_CLASS}`).forEach((node) => node.remove());
-    [STYLE_ID, BADGE_ID, PANEL_ID, READER_ID].forEach((id) => {
+    [STYLE_ID, BADGE_ID, PANEL_ID, READER_ID, FLOATING_BUTTON_ID].forEach((id) => {
       const node = doc.getElementById(id);
       if (node) node.remove();
     });
@@ -998,11 +1180,15 @@
     clearTimers();
     if (runtime.observer) runtime.observer.disconnect();
     runtime.observer = null;
+    unbindViewportSync();
     if (runtime.buttonSubscription && typeof runtime.buttonSubscription.stop === 'function') {
       runtime.buttonSubscription.stop();
     }
     runtime.buttonSubscription = null;
     removeOwnedDom();
+    const doc = getHostDocument();
+    doc.documentElement.style.removeProperty('--th-reader-visual-height');
+    doc.documentElement.style.removeProperty('--th-reader-visual-top');
     const host = getHostWindow();
     if (host[GLOBAL_INSTANCE_KEY] && host[GLOBAL_INSTANCE_KEY].instanceId === runtime.instanceId) {
       delete host[GLOBAL_INSTANCE_KEY];
@@ -1053,6 +1239,8 @@
     claimGlobalInstance();
 
     injectStyle();
+    bindViewportSync();
+    ensureFloatingButton();
     showLoadedBadge();
     const buttonRegistered = registerTavernHelperButton();
     installObserver();
