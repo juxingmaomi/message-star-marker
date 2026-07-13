@@ -1,15 +1,16 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.5.3
+// version: v0.5.4
 // description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.5.3';
+  const SCRIPT_VERSION = 'v0.5.4';
   const BUTTON_NAME = '星心面板';
+  const BUTTON_NAMES = [BUTTON_NAME, '星心列表', '星心刷新'];
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
   const BADGE_ID = 'th-message-star-marker-loaded-badge';
@@ -742,6 +743,7 @@
   function scanMessages() {
     runtime.scanTimer = null;
     getMessageNodes().forEach(attachButtons);
+    ensureFloatingPanelButton();
   }
 
   function scheduleScan(delay) {
@@ -1020,6 +1022,21 @@
         opacity: 0.72;
         pointer-events: none;
       }
+      @media (max-width: 700px) {
+        #${PANEL_ID} {
+          right: 8px;
+          bottom: calc(env(safe-area-inset-bottom, 0px) + 126px);
+          width: calc(100vw - 16px);
+          max-height: min(520px, calc(100dvh - 150px));
+        }
+        #${FLOATING_BUTTON_ID} {
+          right: 12px;
+          bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+          min-width: 54px;
+          height: 36px;
+          opacity: 0.9;
+        }
+      }
     `;
   }
 
@@ -1220,20 +1237,49 @@
     };
   }
 
-  function registerTavernHelperButton() {
-    const handler = () => {
-      toggleMarkerPanel();
-    };
+  function getHelperFunction(name) {
+    if (typeof window[name] === 'function') return window[name];
     try {
-      if (typeof appendInexistentScriptButtons === 'function' && typeof getButtonEvent === 'function' && typeof eventOn === 'function') {
-        appendInexistentScriptButtons([{ name: BUTTON_NAME, visible: true }]);
-        eventOn(getButtonEvent(BUTTON_NAME), handler);
-      } else if (typeof eventOnButton === 'function') {
-        eventOnButton(BUTTON_NAME, handler);
+      const raw = window.TavernHelper && window.TavernHelper._bind
+        && window.TavernHelper._bind[`_${name}`];
+      if (typeof raw === 'function') return (...args) => raw.call(window, ...args);
+    } catch (error) {
+      // TavernHelper may still be initializing.
+    }
+    return null;
+  }
+
+  function registerTavernHelperButton() {
+    if (!runtime.buttonHandler) runtime.buttonHandler = () => toggleMarkerPanel();
+    const appendButtons = getHelperFunction('appendInexistentScriptButtons');
+    const getButtonEventFn = getHelperFunction('getButtonEvent');
+    const eventOnFn = getHelperFunction('eventOn');
+    const eventOnButtonFn = getHelperFunction('eventOnButton');
+    try {
+      if (appendButtons && getButtonEventFn && eventOnFn) {
+        appendButtons([{ name: BUTTON_NAME, visible: true }]);
+        BUTTON_NAMES.forEach((name) => eventOnFn(getButtonEventFn(name), runtime.buttonHandler));
+        return true;
+      }
+      if (eventOnButtonFn) {
+        BUTTON_NAMES.forEach((name) => eventOnButtonFn(name, runtime.buttonHandler));
+        return true;
       }
     } catch (error) {
       console.warn(`[${SCRIPT_NAME}] 注册酒馆助手按钮失败`, error);
     }
+    return false;
+  }
+
+  function restoreRuntime() {
+    if (runtime.stopping) return;
+    const doc = getHostDocument();
+    if (!doc.head || !doc.body) return;
+    injectStyle();
+    ensureFloatingPanelButton();
+    installObserver();
+    scanMessages();
+    [0, 500, 1500, 3500].forEach((delay) => setTimeout(registerTavernHelperButton, delay));
   }
 
   function register() {
@@ -1249,17 +1295,18 @@
     injectStyle();
     showLoadedBadge();
     ensureFloatingPanelButton();
-    setTimeout(registerTavernHelperButton, 1000);
+    [300, 1000, 2500, 5000].forEach((delay) => setTimeout(registerTavernHelperButton, delay));
     installObserver();
     scanMessages();
     [300, 900, 1800, 3500].forEach((delay) => setTimeout(scanMessages, delay));
     notify('success', `${SCRIPT_NAME} 已加载`);
   }
 
-  window.addEventListener('pagehide', stopInstance, { once: true });
-  window.addEventListener('unload', stopInstance, { once: true });
-
   const initialDocument = getHostDocument();
+  window.addEventListener('pageshow', restoreRuntime);
+  initialDocument.addEventListener('visibilitychange', () => {
+    if (initialDocument.visibilityState === 'visible') restoreRuntime();
+  });
   if (initialDocument.readyState === 'loading') {
     initialDocument.addEventListener('DOMContentLoaded', register, { once: true });
   } else {
