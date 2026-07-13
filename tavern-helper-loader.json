@@ -3,7 +3,7 @@
   "enabled": true,
   "name": "楼层星心标记 GitHub入口",
   "id": "message-star-marker-github-loader-manual",
-  "content": "﻿(async () => {\n  const REPO = 'juxingmaomi/message-star-marker';\n  const VERSION = 'v0.5.3';\n  const URL = `https://cdn.jsdelivr.net/gh/${REPO}@${VERSION}/index.js`;\n\n  const loaderState = {\n    repo: REPO,\n    loadedTag: VERSION,\n    source: 'manual',\n    url: URL,\n    requestedAt: new Date().toISOString(),\n  };\n  window.__TH_MESSAGE_STAR_MARKER_LOADER__ = loaderState;\n\n  function popup(type, message) {\n    try {\n      let toastr = window.toastr;\n      try {\n        if (!toastr && window.parent && window.parent !== window) {\n          toastr = window.parent.toastr;\n        }\n      } catch (_) {}\n      if (toastr && typeof toastr[type] === 'function') {\n        toastr[type](message);\n        return;\n      }\n      if (type === 'error') {\n        alert(message);\n        return;\n      }\n      console.log(`[message-star-marker] ${message}`);\n    } catch (error) {\n      console.warn('[message-star-marker] Popup failed.', error);\n    }\n  }\n\n  try {\n    await import(URL);\n    loaderState.loadedAt = new Date().toISOString();\n    popup('success', `楼层星心标记已加载 ${VERSION}`);\n  } catch (error) {\n    loaderState.error = String(error && error.message || error);\n    console.error('[message-star-marker] Load failed.', error);\n    popup('error', `楼层星心标记 ${VERSION} 加载失败。请确认 GitHub 仓库已经发布这个版本，或稍后再试。`);\n  }\n})();\r\n",
+  "content": "﻿(async () => {\n  const REPO = 'juxingmaomi/message-star-marker';\n  const VERSION = 'v0.5.4';\n  const URL = `https://cdn.jsdelivr.net/gh/${REPO}@${VERSION}/index.js`;\n\n  const loaderState = {\n    repo: REPO,\n    loadedTag: VERSION,\n    source: 'manual',\n    url: URL,\n    requestedAt: new Date().toISOString(),\n  };\n  window.__TH_MESSAGE_STAR_MARKER_LOADER__ = loaderState;\n\n  function popup(type, message) {\n    try {\n      let toastr = window.toastr;\n      try {\n        if (!toastr && window.parent && window.parent !== window) {\n          toastr = window.parent.toastr;\n        }\n      } catch (_) {}\n      if (toastr && typeof toastr[type] === 'function') {\n        toastr[type](message);\n        return;\n      }\n      if (type === 'error') {\n        alert(message);\n        return;\n      }\n      console.log(`[message-star-marker] ${message}`);\n    } catch (error) {\n      console.warn('[message-star-marker] Popup failed.', error);\n    }\n  }\n\n  try {\n    await import(URL);\n    loaderState.loadedAt = new Date().toISOString();\n    popup('success', `楼层星心标记已加载 ${VERSION}`);\n  } catch (error) {\n    loaderState.error = String(error && error.message || error);\n    console.error('[message-star-marker] Load failed.', error);\n    popup('error', `楼层星心标记 ${VERSION} 加载失败。请确认 GitHub 仓库已经发布这个版本，或稍后再试。`);\n  }\n})();\r\n",
   "info": "从 GitHub/jsDelivr 加载手动指定版本的楼层星心标记。以后更新只需要修改 VERSION。",
   "button": {
     "enabled": true,
@@ -15,7 +15,7 @@
     ]
   },
   "data": {
-    "version": "v0.5.3",
+    "version": "v0.5.4",
     "plugin": "message-star-marker",
     "loader": "github-jsdelivr-manual",
     "repo": "juxingmaomi/message-star-marker"
