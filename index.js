@@ -1,20 +1,19 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.5.6
+// version: v0.6.0
 // description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.5.6';
+  const SCRIPT_VERSION = 'v0.6.0';
   const BUTTON_NAME = '楼层书签跳转';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
   const BADGE_ID = 'th-message-star-marker-loaded-badge';
   const PANEL_ID = 'th-message-star-marker-panel';
-  const FLOATING_BUTTON_ID = 'th-message-star-marker-floating-button';
   const BUTTON_CLASS = 'th-message-marker-btn';
   const FOOTER_CLASS = 'th-message-marker-footer';
   const ACTIVE_CLASS = 'th-message-marker-active';
@@ -127,15 +126,6 @@
     const textarea = doc.createElement('textarea');
     textarea.innerHTML = String(value || '');
     return textarea.value;
-  }
-
-  function isElementVisible(element) {
-    if (!element || !element.isConnected) return false;
-    const host = getHostWindow();
-    const style = host.getComputedStyle ? host.getComputedStyle(element) : null;
-    if (style && (style.display === 'none' || style.visibility === 'hidden')) return false;
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
   }
 
   function getChatContainer() {
@@ -986,26 +976,6 @@
       .th-message-marker-panel-jump:hover {
         background: rgba(255, 255, 255, 0.12);
       }
-      #${FLOATING_BUTTON_ID} {
-        position: fixed;
-        right: 10px;
-        bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
-        z-index: 2147483645;
-        min-width: 100px;
-        height: 30px;
-        padding: 0 8px;
-        border: 1px solid rgba(120, 150, 140, 0.55);
-        border-radius: 8px;
-        background: rgba(22, 30, 27, 0.88);
-        color: #edf6ef;
-        cursor: pointer;
-        font: 13px/1 Arial, "Microsoft YaHei", sans-serif;
-        opacity: 0.72;
-      }
-      #${FLOATING_BUTTON_ID}:hover {
-        opacity: 1;
-        background: rgba(22, 30, 27, 0.96);
-      }
       #${BADGE_ID} {
         position: fixed;
         right: 8px;
@@ -1027,13 +997,6 @@
           width: calc(100vw - 16px);
           max-height: min(520px, calc(100dvh - 150px));
         }
-        #${FLOATING_BUTTON_ID} {
-          right: 12px;
-          bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
-          min-width: 108px;
-          height: 36px;
-          opacity: 0.9;
-        }
       }
     `;
   }
@@ -1048,25 +1011,6 @@
     setTimeout(() => {
       if (badge && badge.parentNode) badge.remove();
     }, 6500);
-  }
-
-  function ensureFloatingPanelButton() {
-    const doc = getHostDocument();
-    if (!doc.body) return;
-    let button = doc.getElementById(FLOATING_BUTTON_ID);
-    if (!button) {
-      button = doc.createElement('button');
-      button.id = FLOATING_BUTTON_ID;
-      button.type = 'button';
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleMarkerPanel();
-      });
-      doc.body.appendChild(button);
-    }
-    button.textContent = BUTTON_NAME;
-    button.title = '打开楼层书签跳转面板';
   }
 
   function closeMarkerPanel() {
@@ -1126,6 +1070,9 @@
   function renderMarkerPanel(filterType) {
     const doc = getHostDocument();
     if (!doc.body) return null;
+    const host = getHostWindow();
+    const isMobile = host.matchMedia && host.matchMedia('(max-width: 700px)').matches;
+    const mountTarget = isMobile ? doc.getElementById('movingDivs') || doc.body : doc.body;
     let panel = doc.getElementById(PANEL_ID);
     if (!panel) {
       panel = doc.createElement('div');
@@ -1152,7 +1099,7 @@
           panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
         }
       });
-      doc.body.appendChild(panel);
+      mountTarget.appendChild(panel);
     }
     panel.dataset.filter = filterType || panel.dataset.filter || 'all';
     panel.innerHTML = buildPanelHtml(panel.dataset.filter);
@@ -1191,8 +1138,6 @@
     if (badge) badge.remove();
     const panel = doc.getElementById(PANEL_ID);
     if (panel) panel.remove();
-    const floatingButton = doc.getElementById(FLOATING_BUTTON_ID);
-    if (floatingButton) floatingButton.remove();
   }
 
   function stopInstance() {
@@ -1201,11 +1146,6 @@
     clearTimers();
     if (runtime.observer) runtime.observer.disconnect();
     runtime.observer = null;
-    if (runtime.hostClickDocument && runtime.hostClickHandler) {
-      runtime.hostClickDocument.removeEventListener('click', runtime.hostClickHandler, true);
-    }
-    runtime.hostClickDocument = null;
-    runtime.hostClickHandler = null;
     removeOwnedDom();
     const host = getHostWindow();
     if (host[GLOBAL_INSTANCE_KEY] && host[GLOBAL_INSTANCE_KEY].instanceId === runtime.instanceId) {
@@ -1243,10 +1183,7 @@
   function registerTavernHelperButton() {
     if (!runtime.buttonHandler) runtime.buttonHandler = () => toggleMarkerPanel();
     try {
-      if (typeof window.appendInexistentScriptButtons === 'function'
-        && typeof window.getButtonEvent === 'function'
-        && typeof window.eventOn === 'function') {
-        window.appendInexistentScriptButtons([{ name: BUTTON_NAME, visible: true }]);
+      if (typeof window.getButtonEvent === 'function' && typeof window.eventOn === 'function') {
         window.eventOn(window.getButtonEvent(BUTTON_NAME), runtime.buttonHandler);
         return true;
       }
@@ -1257,38 +1194,8 @@
     } catch (error) {
       console.warn(`[${SCRIPT_NAME}] 注册酒馆助手按钮失败`, error);
     }
+    console.error(`[${SCRIPT_NAME}] 未找到 TavernHelper 脚本按钮事件接口`);
     return false;
-  }
-
-  function installHostButtonFallback() {
-    const doc = getHostDocument();
-    if (!doc || runtime.hostClickDocument === doc) return;
-    if (runtime.hostClickDocument && runtime.hostClickHandler) {
-      runtime.hostClickDocument.removeEventListener('click', runtime.hostClickHandler, true);
-    }
-    runtime.hostClickHandler = (event) => {
-      const target = event.target && event.target.closest
-        ? event.target.closest('button, [role="button"], .menu_button, .stscript_btn')
-        : null;
-      if (!target || target.id === FLOATING_BUTTON_ID) return;
-      if (String(target.textContent || '').replace(/\s+/g, '').trim() !== BUTTON_NAME) return;
-      event.preventDefault();
-      event.stopPropagation();
-      toggleMarkerPanel();
-    };
-    doc.addEventListener('click', runtime.hostClickHandler, true);
-    runtime.hostClickDocument = doc;
-  }
-
-  function restoreEntryPoints() {
-    if (runtime.stopping) return;
-    const doc = getHostDocument();
-    if (!doc.head || !doc.body) return;
-    injectStyle();
-    ensureFloatingPanelButton();
-    installHostButtonFallback();
-    scheduleScan(0);
-    [0, 500, 1500, 3500].forEach((delay) => setTimeout(registerTavernHelperButton, delay));
   }
 
   function register() {
@@ -1303,20 +1210,16 @@
 
     injectStyle();
     showLoadedBadge();
-    ensureFloatingPanelButton();
-    installHostButtonFallback();
-    [300, 1000, 2500, 5000].forEach((delay) => setTimeout(registerTavernHelperButton, delay));
+    const buttonRegistered = registerTavernHelperButton();
     installObserver();
     scanMessages();
     [300, 900, 1800, 3500].forEach((delay) => setTimeout(scanMessages, delay));
+    console.info(`[${SCRIPT_NAME}] ${SCRIPT_VERSION} 初始化完成，按钮事件：${buttonRegistered ? '已注册' : '未注册'}`);
     notify('success', `${SCRIPT_NAME} 已加载`);
   }
 
   const initialDocument = getHostDocument();
-  window.addEventListener('pageshow', restoreEntryPoints);
-  initialDocument.addEventListener('visibilitychange', () => {
-    if (initialDocument.visibilityState === 'visible') restoreEntryPoints();
-  });
+  window.addEventListener('pagehide', stopInstance, { once: true });
   if (initialDocument.readyState === 'loading') {
     initialDocument.addEventListener('DOMContentLoaded', register, { once: true });
   } else {
