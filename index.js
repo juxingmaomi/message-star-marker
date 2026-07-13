@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.5.5
+// version: v0.5.6
 // description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.5.5';
+  const SCRIPT_VERSION = 'v0.5.6';
   const BUTTON_NAME = '楼层书签跳转';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
@@ -742,7 +742,6 @@
   function scanMessages() {
     runtime.scanTimer = null;
     getMessageNodes().forEach(attachButtons);
-    ensureFloatingPanelButton();
   }
 
   function scheduleScan(delay) {
@@ -1202,6 +1201,11 @@
     clearTimers();
     if (runtime.observer) runtime.observer.disconnect();
     runtime.observer = null;
+    if (runtime.hostClickDocument && runtime.hostClickHandler) {
+      runtime.hostClickDocument.removeEventListener('click', runtime.hostClickHandler, true);
+    }
+    runtime.hostClickDocument = null;
+    runtime.hostClickHandler = null;
     removeOwnedDom();
     const host = getHostWindow();
     if (host[GLOBAL_INSTANCE_KEY] && host[GLOBAL_INSTANCE_KEY].instanceId === runtime.instanceId) {
@@ -1236,35 +1240,18 @@
     };
   }
 
-  function getHelperFunction(name) {
-    if (typeof window[name] === 'function') return window[name];
-    try {
-      const raw = window.TavernHelper && window.TavernHelper._bind
-        && window.TavernHelper._bind[`_${name}`];
-      if (typeof raw === 'function') return (...args) => raw.call(window, ...args);
-    } catch (error) {
-      // TavernHelper may still be initializing.
-    }
-    return null;
-  }
-
   function registerTavernHelperButton() {
     if (!runtime.buttonHandler) runtime.buttonHandler = () => toggleMarkerPanel();
-    const appendButtons = getHelperFunction('appendInexistentScriptButtons');
-    const replaceButtons = getHelperFunction('replaceScriptButtons');
-    const getButtonEventFn = getHelperFunction('getButtonEvent');
-    const eventOnFn = getHelperFunction('eventOn');
-    const eventOnButtonFn = getHelperFunction('eventOnButton');
     try {
-      if ((replaceButtons || appendButtons) && getButtonEventFn && eventOnFn) {
-        const buttons = [{ name: BUTTON_NAME, visible: true }];
-        if (replaceButtons) replaceButtons(buttons);
-        else if (appendButtons) appendButtons(buttons);
-        eventOnFn(getButtonEventFn(BUTTON_NAME), runtime.buttonHandler);
+      if (typeof window.appendInexistentScriptButtons === 'function'
+        && typeof window.getButtonEvent === 'function'
+        && typeof window.eventOn === 'function') {
+        window.appendInexistentScriptButtons([{ name: BUTTON_NAME, visible: true }]);
+        window.eventOn(window.getButtonEvent(BUTTON_NAME), runtime.buttonHandler);
         return true;
       }
-      if (eventOnButtonFn) {
-        eventOnButtonFn(BUTTON_NAME, runtime.buttonHandler);
+      if (typeof window.eventOnButton === 'function') {
+        window.eventOnButton(BUTTON_NAME, runtime.buttonHandler);
         return true;
       }
     } catch (error) {
@@ -1273,14 +1260,34 @@
     return false;
   }
 
-  function restoreRuntime() {
+  function installHostButtonFallback() {
+    const doc = getHostDocument();
+    if (!doc || runtime.hostClickDocument === doc) return;
+    if (runtime.hostClickDocument && runtime.hostClickHandler) {
+      runtime.hostClickDocument.removeEventListener('click', runtime.hostClickHandler, true);
+    }
+    runtime.hostClickHandler = (event) => {
+      const target = event.target && event.target.closest
+        ? event.target.closest('button, [role="button"], .menu_button, .stscript_btn')
+        : null;
+      if (!target || target.id === FLOATING_BUTTON_ID) return;
+      if (String(target.textContent || '').replace(/\s+/g, '').trim() !== BUTTON_NAME) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toggleMarkerPanel();
+    };
+    doc.addEventListener('click', runtime.hostClickHandler, true);
+    runtime.hostClickDocument = doc;
+  }
+
+  function restoreEntryPoints() {
     if (runtime.stopping) return;
     const doc = getHostDocument();
     if (!doc.head || !doc.body) return;
     injectStyle();
     ensureFloatingPanelButton();
-    installObserver();
-    scanMessages();
+    installHostButtonFallback();
+    scheduleScan(0);
     [0, 500, 1500, 3500].forEach((delay) => setTimeout(registerTavernHelperButton, delay));
   }
 
@@ -1297,6 +1304,7 @@
     injectStyle();
     showLoadedBadge();
     ensureFloatingPanelButton();
+    installHostButtonFallback();
     [300, 1000, 2500, 5000].forEach((delay) => setTimeout(registerTavernHelperButton, delay));
     installObserver();
     scanMessages();
@@ -1305,9 +1313,9 @@
   }
 
   const initialDocument = getHostDocument();
-  window.addEventListener('pageshow', restoreRuntime);
+  window.addEventListener('pageshow', restoreEntryPoints);
   initialDocument.addEventListener('visibilitychange', () => {
-    if (initialDocument.visibilityState === 'visible') restoreRuntime();
+    if (initialDocument.visibilityState === 'visible') restoreEntryPoints();
   });
   if (initialDocument.readyState === 'loading') {
     initialDocument.addEventListener('DOMContentLoaded', register, { once: true });
