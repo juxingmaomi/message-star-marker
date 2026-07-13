@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.2
+// version: reader-v0.1.3
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.2';
+  const SCRIPT_VERSION = 'reader-v0.1.3';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -811,11 +811,11 @@
         width: 50px;
         height: 50px;
         padding: 0;
-        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.58));
+        border: 1px solid #d4a72c;
         border-radius: 14px;
-        background: var(--SmartThemeBlurTintColor, rgba(35, 63, 52, 0.94));
+        background: #f2c84b;
         color: inherit;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.26);
+        box-shadow: none;
         cursor: grab;
         touch-action: none;
         user-select: none;
@@ -829,7 +829,7 @@
       }
       #${FLOATING_BUTTON_ID}:hover,
       #${FLOATING_BUTTON_ID}:focus-visible {
-        background: rgba(55, 93, 76, 0.98);
+        background: #f6d768;
         outline: none;
       }
       #${PANEL_ID} {
@@ -1064,6 +1064,13 @@
       }
       .th-message-marker-reader-content > :last-child {
         margin-bottom: 0;
+      }
+      .th-message-marker-reader-content q {
+        quotes: none;
+      }
+      .th-message-marker-reader-content q::before,
+      .th-message-marker-reader-content q::after {
+        content: none !important;
       }
       .th-message-marker-reader-nav {
         display: grid;
