@@ -1,16 +1,15 @@
 // == TavernHelper Script ==
 // name: 楼层星心标记
 // author: Codex
-// version: v0.5.4
+// version: v0.5.5
 // description: 在 AI 消息楼层顶部和底部添加问答、来信、星星和爱心标记；状态保存到聊天消息 extra 中。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层星心标记';
-  const SCRIPT_VERSION = 'v0.5.4';
-  const BUTTON_NAME = '星心面板';
-  const BUTTON_NAMES = [BUTTON_NAME, '星心列表', '星心刷新'];
+  const SCRIPT_VERSION = 'v0.5.5';
+  const BUTTON_NAME = '楼层书签跳转';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-star-marker-style-v3';
   const BADGE_ID = 'th-message-star-marker-loaded-badge';
@@ -993,7 +992,7 @@
         right: 10px;
         bottom: calc(env(safe-area-inset-bottom, 0px) + 40px);
         z-index: 2147483645;
-        min-width: 46px;
+        min-width: 100px;
         height: 30px;
         padding: 0 8px;
         border: 1px solid rgba(120, 150, 140, 0.55);
@@ -1032,7 +1031,7 @@
         #${FLOATING_BUTTON_ID} {
           right: 12px;
           bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
-          min-width: 54px;
+          min-width: 108px;
           height: 36px;
           opacity: 0.9;
         }
@@ -1045,7 +1044,7 @@
     if (!doc.body || doc.getElementById(BADGE_ID)) return;
     const badge = doc.createElement('div');
     badge.id = BADGE_ID;
-    badge.textContent = '星心✓';
+    badge.textContent = '书签✓';
     doc.body.appendChild(badge);
     setTimeout(() => {
       if (badge && badge.parentNode) badge.remove();
@@ -1060,8 +1059,6 @@
       button = doc.createElement('button');
       button.id = FLOATING_BUTTON_ID;
       button.type = 'button';
-      button.textContent = '星心';
-      button.title = '打开星心列表';
       button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -1069,6 +1066,8 @@
       });
       doc.body.appendChild(button);
     }
+    button.textContent = BUTTON_NAME;
+    button.title = '打开楼层书签跳转面板';
   }
 
   function closeMarkerPanel() {
@@ -1107,7 +1106,7 @@
 
     return `
       <div class="th-message-marker-panel-head">
-        <div class="th-message-marker-panel-title">星心列表${range ? ` · 临时显示 ${range.start + 1}-${range.end + 1} 楼` : ''}</div>
+        <div class="th-message-marker-panel-title">楼层书签跳转${range ? ` · 临时显示 ${range.start + 1}-${range.end + 1} 楼` : ''}</div>
         <div class="th-message-marker-panel-tools">
           ${range ? '<button type="button" class="th-message-marker-panel-restore" data-action="restore-chat-view">恢复完整聊天</button>' : ''}
           <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭">×</button>
@@ -1252,17 +1251,20 @@
   function registerTavernHelperButton() {
     if (!runtime.buttonHandler) runtime.buttonHandler = () => toggleMarkerPanel();
     const appendButtons = getHelperFunction('appendInexistentScriptButtons');
+    const replaceButtons = getHelperFunction('replaceScriptButtons');
     const getButtonEventFn = getHelperFunction('getButtonEvent');
     const eventOnFn = getHelperFunction('eventOn');
     const eventOnButtonFn = getHelperFunction('eventOnButton');
     try {
-      if (appendButtons && getButtonEventFn && eventOnFn) {
-        appendButtons([{ name: BUTTON_NAME, visible: true }]);
-        BUTTON_NAMES.forEach((name) => eventOnFn(getButtonEventFn(name), runtime.buttonHandler));
+      if ((replaceButtons || appendButtons) && getButtonEventFn && eventOnFn) {
+        const buttons = [{ name: BUTTON_NAME, visible: true }];
+        if (replaceButtons) replaceButtons(buttons);
+        else if (appendButtons) appendButtons(buttons);
+        eventOnFn(getButtonEventFn(BUTTON_NAME), runtime.buttonHandler);
         return true;
       }
       if (eventOnButtonFn) {
-        BUTTON_NAMES.forEach((name) => eventOnButtonFn(name, runtime.buttonHandler));
+        eventOnButtonFn(BUTTON_NAME, runtime.buttonHandler);
         return true;
       }
     } catch (error) {
