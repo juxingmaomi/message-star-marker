@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.0
+// version: reader-v0.1.1
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.0';
+  const SCRIPT_VERSION = 'reader-v0.1.1';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -429,7 +429,10 @@
         </header>
         <div class="th-message-marker-reader-marker-row" aria-label="顶部楼层书签">${markerButtonsHtml(index, 'top')}</div>
         <div class="th-message-marker-reader-content mes_text" data-reader-message-id="${index}">${formatReaderMessage(record, index)}</div>
-        <div class="th-message-marker-reader-marker-row th-message-marker-reader-marker-row-bottom" aria-label="底部楼层书签">${markerButtonsHtml(index, 'bottom')}</div>
+        <div class="th-message-marker-reader-marker-row th-message-marker-reader-marker-row-bottom" aria-label="底部楼层书签">
+          <button type="button" class="th-message-marker-reader-list-button" data-action="open-reader-list">书签列表</button>
+          <div class="th-message-marker-reader-marker-group">${markerButtonsHtml(index, 'bottom')}</div>
+        </div>
         <footer class="th-message-marker-reader-nav">
           <button type="button" class="th-message-marker-reader-nav-button" data-action="reader-previous" ${previousIndex == null ? 'disabled' : ''}>‹ 上一层</button>
           <span class="th-message-marker-reader-position">${index + 1} / ${getChat().length}</span>
@@ -475,6 +478,10 @@
           const direction = action === 'reader-previous' ? -1 : 1;
           const adjacentIndex = findAdjacentAssistantIndex(runtime.readerIndex, direction);
           if (adjacentIndex != null) renderReader(adjacentIndex);
+        } else if (action === 'open-reader-list') {
+          const panel = getHostDocument().getElementById(PANEL_ID);
+          if (panel) closeMarkerPanel();
+          else renderMarkerPanel('all');
         } else if (action === 'toggle-reader-marker') {
           const markerType = actionNode.dataset.markerType;
           const current = getChat()[runtime.readerIndex];
@@ -656,7 +663,7 @@
         position: fixed;
         right: 14px;
         bottom: calc(env(safe-area-inset-bottom, 0px) + 72px);
-        z-index: 2147483645;
+        z-index: 2147483647;
         width: min(360px, calc(100vw - 24px));
         max-height: min(540px, calc(100dvh - 96px));
         display: flex;
@@ -839,8 +846,34 @@
         border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.22));
       }
       .th-message-marker-reader-marker-row-bottom {
+        justify-content: space-between;
         border-top: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.22));
         border-bottom: 0;
+      }
+      .th-message-marker-reader-marker-group {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+      }
+      .th-message-marker-reader-list-button {
+        flex: 0 0 auto;
+        min-width: 82px;
+        height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.36));
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        color: inherit;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+      .th-message-marker-reader-list-button:hover,
+      .th-message-marker-reader-list-button:focus-visible {
+        background: rgba(255, 255, 255, 0.12);
+        outline: none;
       }
       .th-message-marker-reader-content {
         min-height: 180px;
