@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.9
+// version: reader-v0.2.0
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.9';
+  const SCRIPT_VERSION = 'reader-v0.2.0';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -20,8 +20,21 @@
   const FOOTER_CLASS = 'th-message-marker-footer';
   const ACTIVE_CLASS = 'th-message-marker-active';
   const EXTRA_KEY = 'thMessageMarker';
+  const SETTINGS_KEY = 'messageStarMarkerReader';
   const MAX_READER_IFRAMES = 6;
   const READER_IFRAME_MESSAGE = 'th-message-marker-reader-iframe-height';
+
+  const DEFAULT_SETTINGS = {
+    showFloatingButton: true,
+    showTopButtons: true,
+    showBottomButtons: true,
+    markers: {
+      qa: { symbol: '问答', activeColor: '#2f91b4' },
+      letter: { symbol: '来信', activeColor: '#4f9b68' },
+      star: { symbol: '★', activeColor: '#f2a900' },
+      heart: { symbol: '♥', activeColor: '#df4f73' },
+    },
+  };
 
   const MARKERS = [
     { type: 'qa', symbol: '问答', textual: true, activeColor: '#2f91b4', onTitle: '取消问答标记', offTitle: '标记为问答' },
@@ -41,6 +54,7 @@
     viewportHandler: null,
     iframeMessageHandler: null,
     readerFrames: new Map(),
+    settings: null,
     stopping: false,
   };
 
@@ -95,6 +109,66 @@
       // Continue without a context until the next scan.
     }
     return null;
+  }
+
+  function cloneDefaultSettings() {
+    return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  }
+
+  function sanitizeMarkerSymbol(value, fallback) {
+    const text = String(value == null ? '' : value).trim();
+    return Array.from(text || fallback).slice(0, 8).join('');
+  }
+
+  function sanitizeColor(value, fallback) {
+    const text = String(value || '').trim();
+    return /^#[0-9a-f]{6}$/i.test(text) ? text.toLowerCase() : fallback;
+  }
+
+  function sanitizeSettings(value) {
+    const settings = cloneDefaultSettings();
+    if (!value || typeof value !== 'object') return settings;
+    ['showFloatingButton', 'showTopButtons', 'showBottomButtons'].forEach((key) => {
+      if (typeof value[key] === 'boolean') settings[key] = value[key];
+    });
+    Object.keys(settings.markers).forEach((type) => {
+      const source = value.markers && value.markers[type];
+      if (!source || typeof source !== 'object') return;
+      settings.markers[type].symbol = sanitizeMarkerSymbol(source.symbol, settings.markers[type].symbol);
+      settings.markers[type].activeColor = sanitizeColor(source.activeColor, settings.markers[type].activeColor);
+    });
+    return settings;
+  }
+
+  function applySettingsToMarkers() {
+    const settings = runtime.settings || cloneDefaultSettings();
+    MARKERS.forEach((marker) => {
+      const display = settings.markers[marker.type] || DEFAULT_SETTINGS.markers[marker.type];
+      marker.symbol = display.symbol;
+      marker.activeColor = display.activeColor;
+      marker.textual = Array.from(display.symbol).length > 1;
+    });
+  }
+
+  function loadSettings() {
+    const context = getTavernContext();
+    const stored = context && context.extensionSettings && context.extensionSettings[SETTINGS_KEY];
+    runtime.settings = sanitizeSettings(stored);
+    applySettingsToMarkers();
+    return runtime.settings;
+  }
+
+  function saveSettings(settings) {
+    runtime.settings = sanitizeSettings(settings);
+    applySettingsToMarkers();
+    const context = getTavernContext();
+    if (!context || !context.extensionSettings || typeof context.saveSettingsDebounced !== 'function') {
+      notify('warning', '设置已在当前页面生效，但暂时无法写入酒馆设置。');
+      return false;
+    }
+    context.extensionSettings[SETTINGS_KEY] = JSON.parse(JSON.stringify(runtime.settings));
+    context.saveSettingsDebounced();
+    return true;
   }
 
   function notify(type, message) {
@@ -415,7 +489,7 @@
     const active = isRecordMarked(record, marker.type);
     button.classList.toggle(ACTIVE_CLASS, active);
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
-    button.title = active ? marker.onTitle : marker.offTitle;
+    button.title = active ? `取消${marker.symbol}标记` : `标记为${marker.symbol}`;
     button.setAttribute('aria-label', button.title);
     button.style.setProperty('--th-marker-active-color', marker.activeColor);
   }
@@ -480,33 +554,46 @@
     const container = getButtonContainer(node);
     if (!container) return;
 
-    const beforeNode = getBeforeNode(container);
-    MARKERS.forEach((marker) => {
-      let button = container.querySelector(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"][data-th-marker-placement="top"]`);
-      if (!button) {
-        button = createMessageButton(node, marker, 'top');
-        if (beforeNode && beforeNode.parentNode === container) container.insertBefore(button, beforeNode);
-        else container.appendChild(button);
-      }
-      syncButton(button, record, marker);
-    });
+    const settings = runtime.settings || DEFAULT_SETTINGS;
+    if (settings.showTopButtons) {
+      const beforeNode = getBeforeNode(container);
+      MARKERS.forEach((marker) => {
+        let button = container.querySelector(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"][data-th-marker-placement="top"]`);
+        if (!button) {
+          button = createMessageButton(node, marker, 'top');
+          if (beforeNode && beforeNode.parentNode === container) container.insertBefore(button, beforeNode);
+          else container.appendChild(button);
+        }
+        button.textContent = marker.symbol;
+        button.classList.toggle(`${BUTTON_CLASS}-text`, marker.textual);
+        syncButton(button, record, marker);
+      });
+    } else {
+      container.querySelectorAll(`.${BUTTON_CLASS}[data-th-marker-placement="top"]`).forEach((button) => button.remove());
+    }
 
     const footerHost = node.querySelector('.mes_block') || node;
     let footer = Array.from(footerHost.children || []).find((child) => child.classList && child.classList.contains(FOOTER_CLASS));
-    if (!footer) {
-      footer = getHostDocument().createElement('div');
-      footer.className = FOOTER_CLASS;
-      footer.setAttribute('aria-label', '楼层书签');
-      footerHost.appendChild(footer);
-    }
-    MARKERS.forEach((marker) => {
-      let button = footer.querySelector(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"]`);
-      if (!button) {
-        button = createMessageButton(node, marker, 'bottom');
-        footer.appendChild(button);
+    if (settings.showBottomButtons) {
+      if (!footer) {
+        footer = getHostDocument().createElement('div');
+        footer.className = FOOTER_CLASS;
+        footer.setAttribute('aria-label', '楼层书签');
+        footerHost.appendChild(footer);
       }
-      syncButton(button, record, marker);
-    });
+      MARKERS.forEach((marker) => {
+        let button = footer.querySelector(`.${BUTTON_CLASS}[data-th-message-marker="${marker.type}"]`);
+        if (!button) {
+          button = createMessageButton(node, marker, 'bottom');
+          footer.appendChild(button);
+        }
+        button.textContent = marker.symbol;
+        button.classList.toggle(`${BUTTON_CLASS}-text`, marker.textual);
+        syncButton(button, record, marker);
+      });
+    } else if (footer) {
+      footer.remove();
+    }
   }
 
   function scanMessages() {
@@ -530,8 +617,8 @@
       const classes = ['th-message-marker-reader-marker'];
       if (marker.textual) classes.push('th-message-marker-reader-marker-text');
       if (active) classes.push(ACTIVE_CLASS);
-      const title = active ? marker.onTitle : marker.offTitle;
-      return `<button type="button" class="${classes.join(' ')}" data-action="toggle-reader-marker" data-index="${index}" data-marker-type="${marker.type}" data-placement="${placement}" aria-pressed="${active ? 'true' : 'false'}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" style="--th-marker-active-color:${marker.activeColor}">${marker.symbol}</button>`;
+      const title = active ? `取消${marker.symbol}标记` : `标记为${marker.symbol}`;
+      return `<button type="button" class="${classes.join(' ')}" data-action="toggle-reader-marker" data-index="${index}" data-marker-type="${marker.type}" data-placement="${placement}" aria-pressed="${active ? 'true' : 'false'}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" style="--th-marker-active-color:${marker.activeColor}">${escapeHtml(marker.symbol)}</button>`;
     }).join('');
   }
 
@@ -697,6 +784,11 @@
   function ensureFloatingButton() {
     const doc = getHostDocument();
     if (!doc.body) return null;
+    if (!(runtime.settings || DEFAULT_SETTINGS).showFloatingButton) {
+      const oldButton = doc.getElementById(FLOATING_BUTTON_ID);
+      if (oldButton) oldButton.remove();
+      return null;
+    }
     let button = doc.getElementById(FLOATING_BUTTON_ID);
     if (!button) {
       button = doc.createElement('button');
@@ -875,17 +967,11 @@
 
   function buildPanelHtml(filterType) {
     const filter = MARKERS.some((marker) => marker.type === filterType) ? filterType : 'all';
-    const tabs = [
-      { type: 'all', label: '全部' },
-      { type: 'qa', label: '问答' },
-      { type: 'letter', label: '来信' },
-      { type: 'star', label: '星标' },
-      { type: 'heart', label: '爱心' },
-    ];
+    const tabs = [{ type: 'all', label: '全部' }].concat(MARKERS.map((marker) => ({ type: marker.type, label: marker.symbol })));
     const items = collectMarkedItems(filter);
     const listHtml = items.length ? items.map((item) => {
       const actions = item.markers.map((marker) => (
-        `<button type="button" class="th-message-marker-panel-remove" data-action="remove-marker" data-index="${item.index}" data-marker-type="${marker.type}" style="--th-marker-active-color:${marker.activeColor}" title="取消${escapeHtml(marker.symbol)}" aria-label="取消${escapeHtml(marker.symbol)}">${marker.symbol}</button>`
+        `<button type="button" class="th-message-marker-panel-remove" data-action="remove-marker" data-index="${item.index}" data-marker-type="${marker.type}" style="--th-marker-active-color:${marker.activeColor}" title="取消${escapeHtml(marker.symbol)}" aria-label="取消${escapeHtml(marker.symbol)}">${escapeHtml(marker.symbol)}</button>`
       )).join('');
       return `
         <div class="th-message-marker-panel-item">
@@ -900,12 +986,75 @@
     return `
       <div class="th-message-marker-panel-head">
         <div class="th-message-marker-panel-title">楼层书签阅读器</div>
-        <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭" title="关闭">×</button>
+        <div class="th-message-marker-panel-head-actions">
+          <button type="button" class="th-message-marker-panel-settings" data-action="open-marker-settings" aria-label="设置" title="设置">⚙</button>
+          <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭" title="关闭">×</button>
+        </div>
       </div>
       <div class="th-message-marker-panel-tabs">
         ${tabs.map((tab) => `<button type="button" class="th-message-marker-panel-tab" data-action="filter-marker" data-filter="${tab.type}" aria-pressed="${tab.type === filter ? 'true' : 'false'}">${tab.label}</button>`).join('')}
       </div>
       <div class="th-message-marker-panel-list">${listHtml}</div>`;
+  }
+
+  function buildSettingsHtml(settingsValue) {
+    const settings = sanitizeSettings(settingsValue || runtime.settings);
+    const markerRows = MARKERS.map((marker) => {
+      const value = settings.markers[marker.type];
+      return `
+        <label class="th-message-marker-settings-marker">
+          <span class="th-message-marker-settings-key">${escapeHtml(marker.type)}</span>
+          <input type="text" maxlength="8" value="${escapeHtml(value.symbol)}" data-setting-symbol="${marker.type}" aria-label="${escapeHtml(marker.type)} 显示内容">
+          <input type="color" value="${escapeHtml(value.activeColor)}" data-setting-color="${marker.type}" aria-label="${escapeHtml(marker.type)} 点亮颜色">
+        </label>`;
+    }).join('');
+    return `
+      <div class="th-message-marker-panel-head">
+        <div class="th-message-marker-panel-title">书签按钮设置</div>
+        <div class="th-message-marker-panel-head-actions">
+          <button type="button" class="th-message-marker-panel-settings" data-action="back-marker-list" aria-label="返回列表" title="返回列表">‹</button>
+          <button type="button" class="th-message-marker-panel-close" data-action="close-marker-panel" aria-label="关闭" title="关闭">×</button>
+        </div>
+      </div>
+      <form class="th-message-marker-settings-form">
+        <div class="th-message-marker-settings-switches">
+          <label><input type="checkbox" data-setting-toggle="showFloatingButton" ${settings.showFloatingButton ? 'checked' : ''}>显示悬浮猴头</label>
+          <label><input type="checkbox" data-setting-toggle="showTopButtons" ${settings.showTopButtons ? 'checked' : ''}>显示消息顶部按钮</label>
+          <label><input type="checkbox" data-setting-toggle="showBottomButtons" ${settings.showBottomButtons ? 'checked' : ''}>显示消息底部按钮</label>
+        </div>
+        <div class="th-message-marker-settings-markers">${markerRows}</div>
+        <div class="th-message-marker-settings-note">名称和颜色会同步用于酒馆消息、书签列表与阅读器，已有楼层标记不会改变。</div>
+        <div class="th-message-marker-settings-actions">
+          <button type="button" data-action="reset-marker-settings">恢复默认</button>
+          <button type="submit" class="th-message-marker-settings-save">保存</button>
+        </div>
+      </form>`;
+  }
+
+  function readSettingsForm(panel) {
+    const settings = cloneDefaultSettings();
+    panel.querySelectorAll('[data-setting-toggle]').forEach((input) => {
+      settings[input.dataset.settingToggle] = Boolean(input.checked);
+    });
+    MARKERS.forEach((marker) => {
+      const symbol = panel.querySelector(`[data-setting-symbol="${marker.type}"]`);
+      const color = panel.querySelector(`[data-setting-color="${marker.type}"]`);
+      settings.markers[marker.type] = {
+        symbol: symbol ? symbol.value : DEFAULT_SETTINGS.markers[marker.type].symbol,
+        activeColor: color ? color.value : DEFAULT_SETTINGS.markers[marker.type].activeColor,
+      };
+    });
+    return sanitizeSettings(settings);
+  }
+
+  function refreshControlsAfterSettings() {
+    const doc = getHostDocument();
+    doc.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => button.remove());
+    doc.querySelectorAll(`.${FOOTER_CLASS}`).forEach((footer) => footer.remove());
+    const floating = doc.getElementById(FLOATING_BUTTON_ID);
+    if (floating) floating.remove();
+    scanMessages();
+    if (runtime.readerIndex != null) renderReader(runtime.readerIndex);
   }
 
   function renderMarkerPanel(filterType) {
@@ -921,6 +1070,17 @@
         const action = actionNode.dataset.action;
         if (action === 'close-marker-panel') {
           closeMarkerPanel();
+        } else if (action === 'open-marker-settings') {
+          panel.dataset.view = 'settings';
+          panel.innerHTML = buildSettingsHtml(runtime.settings);
+          applyMarkerPanelPosition(panel);
+        } else if (action === 'back-marker-list') {
+          panel.dataset.view = 'list';
+          panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
+          applyMarkerPanelPosition(panel);
+        } else if (action === 'reset-marker-settings') {
+          panel.innerHTML = buildSettingsHtml(DEFAULT_SETTINGS);
+          applyMarkerPanelPosition(panel);
         } else if (action === 'filter-marker') {
           panel.dataset.filter = actionNode.dataset.filter || 'all';
           panel.innerHTML = buildPanelHtml(panel.dataset.filter);
@@ -931,9 +1091,21 @@
           setRecordMarker(actionNode.dataset.index, actionNode.dataset.markerType, false);
         }
       });
+      panel.addEventListener('submit', (event) => {
+        const form = event.target && event.target.closest ? event.target.closest('.th-message-marker-settings-form') : null;
+        if (!form || !panel.contains(form)) return;
+        event.preventDefault();
+        const saved = saveSettings(readSettingsForm(panel));
+        refreshControlsAfterSettings();
+        panel.dataset.view = 'list';
+        panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
+        applyMarkerPanelPosition(panel);
+        notify(saved ? 'success' : 'warning', saved ? '书签按钮设置已保存。' : '设置仅在当前页面生效。');
+      });
       bindMarkerPanelDrag(panel);
       getOverlayMountTarget().appendChild(panel);
     }
+    panel.dataset.view = 'list';
     panel.dataset.filter = filterType || panel.dataset.filter || 'all';
     panel.innerHTML = buildPanelHtml(panel.dataset.filter);
     applyMarkerPanelPosition(panel);
@@ -943,7 +1115,7 @@
 
   function refreshOpenPanel() {
     const panel = getHostDocument().getElementById(PANEL_ID);
-    if (panel) {
+    if (panel && panel.dataset.view !== 'settings') {
       panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
       applyMarkerPanelPosition(panel);
     }
@@ -1109,7 +1281,13 @@
         font-size: 14px;
         font-weight: 800;
       }
+      .th-message-marker-panel-head-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
       .th-message-marker-panel-close,
+      .th-message-marker-panel-settings,
       .th-message-marker-reader-close {
         flex: 0 0 30px;
         width: 30px;
@@ -1207,11 +1385,96 @@
         line-height: 1;
       }
       .th-message-marker-panel-close:hover,
+      .th-message-marker-panel-settings:hover,
       .th-message-marker-reader-close:hover,
       .th-message-marker-panel-open:hover,
       .th-message-marker-panel-remove:hover,
       .th-message-marker-reader-nav-button:not(:disabled):hover {
         background: rgba(255, 255, 255, 0.12);
+      }
+      .th-message-marker-settings-form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px;
+      }
+      .th-message-marker-settings-switches {
+        display: grid;
+        gap: 8px;
+      }
+      .th-message-marker-settings-switches label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 28px;
+        font-size: 13px;
+      }
+      .th-message-marker-settings-switches input[type="checkbox"] {
+        width: 17px;
+        height: 17px;
+        margin: 0;
+      }
+      .th-message-marker-settings-markers {
+        display: grid;
+        gap: 7px;
+      }
+      .th-message-marker-settings-marker {
+        display: grid;
+        grid-template-columns: 54px minmax(0, 1fr) 38px;
+        align-items: center;
+        gap: 7px;
+      }
+      .th-message-marker-settings-key {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11px;
+        opacity: 0.68;
+      }
+      .th-message-marker-settings-marker input[type="text"] {
+        width: 100%;
+        min-width: 0;
+        height: 32px;
+        padding: 0 8px;
+        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.36));
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.07);
+        color: inherit;
+        font: inherit;
+      }
+      .th-message-marker-settings-marker input[type="color"] {
+        width: 38px;
+        height: 32px;
+        padding: 2px;
+        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.36));
+        border-radius: 5px;
+        background: transparent;
+        cursor: pointer;
+      }
+      .th-message-marker-settings-note {
+        font-size: 11px;
+        line-height: 1.55;
+        opacity: 0.68;
+      }
+      .th-message-marker-settings-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .th-message-marker-settings-actions button {
+        height: 34px;
+        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.36));
+        border-radius: 5px;
+        background: rgba(255, 255, 255, 0.07);
+        color: inherit;
+        cursor: pointer;
+      }
+      .th-message-marker-settings-actions .th-message-marker-settings-save {
+        border-color: rgba(242, 169, 0, 0.72);
+        background: rgba(242, 169, 0, 0.15);
+        font-weight: 700;
       }
       #${READER_ID} {
         position: fixed;
@@ -1481,6 +1744,7 @@
       openList: () => renderMarkerPanel('all'),
       openReader,
       getMarkedRecords: () => collectMarkedItems('all'),
+      getSettings: () => JSON.parse(JSON.stringify(runtime.settings || DEFAULT_SETTINGS)),
     };
   }
 
@@ -1504,6 +1768,7 @@
 
     runtime.instanceId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     runtime.stopping = false;
+    loadSettings();
     claimGlobalInstance();
 
     injectStyle();
