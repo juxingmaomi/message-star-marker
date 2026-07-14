@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.2.0
+// version: reader-v0.2.1
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.2.0';
+  const SCRIPT_VERSION = 'reader-v0.2.1';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -999,13 +999,13 @@
 
   function buildSettingsHtml(settingsValue) {
     const settings = sanitizeSettings(settingsValue || runtime.settings);
-    const markerRows = MARKERS.map((marker) => {
+    const markerRows = MARKERS.map((marker, index) => {
       const value = settings.markers[marker.type];
       return `
         <label class="th-message-marker-settings-marker">
-          <span class="th-message-marker-settings-key">${escapeHtml(marker.type)}</span>
-          <input type="text" maxlength="8" value="${escapeHtml(value.symbol)}" data-setting-symbol="${marker.type}" aria-label="${escapeHtml(marker.type)} 显示内容">
-          <input type="color" value="${escapeHtml(value.activeColor)}" data-setting-color="${marker.type}" aria-label="${escapeHtml(marker.type)} 点亮颜色">
+          <span class="th-message-marker-settings-key">按钮 ${index + 1}</span>
+          <input type="text" maxlength="8" value="${escapeHtml(value.symbol)}" data-setting-symbol="${marker.type}" aria-label="按钮 ${index + 1} 显示内容">
+          <input type="color" value="${escapeHtml(value.activeColor)}" data-setting-color="${marker.type}" aria-label="按钮 ${index + 1} 点亮颜色">
         </label>`;
     }).join('');
     return `
