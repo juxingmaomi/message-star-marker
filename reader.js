@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.4
+// version: reader-v0.1.5
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.4';
+  const SCRIPT_VERSION = 'reader-v0.1.5';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -942,7 +942,7 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.45));
+        border: 1px solid #111;
         border-radius: 8px;
         background: var(--SmartThemeBlurTintColor, rgba(22, 30, 27, 0.97));
         box-shadow: none;
@@ -1096,7 +1096,7 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.48));
+        border: 1px solid #111;
         border-radius: 8px;
         background: var(--SmartThemeBlurTintColor, rgba(22, 30, 27, 0.98));
         box-shadow: none;
