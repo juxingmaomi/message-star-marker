@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.5
+// version: reader-v0.1.6
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.5';
+  const SCRIPT_VERSION = 'reader-v0.1.6';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -20,6 +20,8 @@
   const FOOTER_CLASS = 'th-message-marker-footer';
   const ACTIVE_CLASS = 'th-message-marker-active';
   const EXTRA_KEY = 'thMessageMarker';
+  const MAX_READER_IFRAMES = 6;
+  const READER_IFRAME_MESSAGE = 'th-message-marker-reader-iframe-height';
 
   const MARKERS = [
     { type: 'qa', symbol: '问答', textual: true, activeColor: '#2f91b4', onTitle: '取消问答标记', offTitle: '标记为问答' },
@@ -37,6 +39,8 @@
     floatingPosition: null,
     panelPosition: null,
     viewportHandler: null,
+    iframeMessageHandler: null,
+    readerFrames: new Map(),
     stopping: false,
   };
 
@@ -263,12 +267,118 @@
     const context = getTavernContext();
     if (context && typeof context.messageFormatting === 'function') {
       try {
-        return context.messageFormatting(text, record.name || '', false, false, index, {}, false);
+        // The reader deliberately ignores regex depth so historical floors keep display-only formatting.
+        return context.messageFormatting(text, record.name || '', false, false, -1, {}, false);
       } catch (error) {
         console.warn(`[${SCRIPT_NAME}] 消息格式化失败，改用纯文本显示`, error);
       }
     }
     return escapeHtml(text).replace(/\r?\n/g, '<br>');
+  }
+
+  function isFrontendCode(value) {
+    const text = String(value || '').toLowerCase();
+    return ['html>', '<head>', '<body'].some((tag) => text.includes(tag));
+  }
+
+  function buildReaderIframeDocument(source, token) {
+    const tokenJson = JSON.stringify(token);
+    const bridge = `<script>(function(){
+      const token=${tokenJson};
+      let lastHeight=0;
+      const sendHeight=()=>{
+        const root=document.documentElement;
+        const body=document.body;
+        const height=Math.ceil(Math.max(
+          root?root.scrollHeight:0,
+          root?root.getBoundingClientRect().height:0,
+          body?body.scrollHeight:0,
+          body?body.getBoundingClientRect().height:0,
+          80
+        ));
+        if(Math.abs(height-lastHeight)<2)return;
+        lastHeight=height;
+        parent.postMessage({type:${JSON.stringify(READER_IFRAME_MESSAGE)},token,height},'*');
+      };
+      addEventListener('load',sendHeight);
+      addEventListener('resize',sendHeight);
+      if(typeof ResizeObserver==='function'){
+        const observer=new ResizeObserver(sendHeight);
+        if(document.documentElement)observer.observe(document.documentElement);
+        if(document.body)observer.observe(document.body);
+      }
+      [0,80,240,800,1600].forEach(delay=>setTimeout(sendHeight,delay));
+    })();</scr` + `ipt>`;
+    const headExtras = `<meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style data-th-reader-frame>*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;max-width:100%}img,video,canvas,svg{max-width:100%}</style>`;
+    let html = String(source || '');
+    const hasDocumentShell = /<!doctype\b|<html\b|<head\b|<body\b/i.test(html);
+    if (!hasDocumentShell) {
+      return `<!DOCTYPE html><html><head><meta charset="utf-8">${headExtras}</head><body>${html}${bridge}</body></html>`;
+    }
+    if (/<\/head\s*>/i.test(html)) html = html.replace(/<\/head\s*>/i, `${headExtras}</head>`);
+    else html = `${headExtras}${html}`;
+    if (/<\/body\s*>/i.test(html)) html = html.replace(/<\/body\s*>/i, `${bridge}</body>`);
+    else html += bridge;
+    return html;
+  }
+
+  function clearReaderFrames() {
+    runtime.readerFrames.forEach((iframe) => {
+      try {
+        iframe.srcdoc = '';
+      } catch (error) {
+        // Removing the reader also tears down the isolated document.
+      }
+    });
+    runtime.readerFrames.clear();
+  }
+
+  function renderReaderFrontendBlocks(content, index) {
+    if (!content) return 0;
+    let rendered = 0;
+    const pres = Array.from(content.querySelectorAll('pre'));
+    pres.forEach((pre, blockIndex) => {
+      if (rendered >= MAX_READER_IFRAMES) return;
+      const code = pre.querySelector('code');
+      const source = code ? code.textContent : pre.textContent;
+      if (!isFrontendCode(source)) return;
+
+      const token = `${runtime.instanceId}-${index}-${blockIndex}-${Math.random().toString(36).slice(2, 8)}`;
+      const wrapper = getHostDocument().createElement('div');
+      wrapper.className = 'th-message-marker-reader-frame-wrap';
+      const iframe = getHostDocument().createElement('iframe');
+      iframe.className = 'th-message-marker-reader-frame';
+      iframe.title = `第 ${index + 1} 楼美化内容 ${rendered + 1}`;
+      iframe.loading = 'lazy';
+      iframe.referrerPolicy = 'no-referrer';
+      iframe.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+      iframe.srcdoc = buildReaderIframeDocument(source, token);
+      wrapper.appendChild(iframe);
+      pre.replaceWith(wrapper);
+      runtime.readerFrames.set(token, iframe);
+      rendered += 1;
+    });
+    return rendered;
+  }
+
+  function bindReaderIframeMessages() {
+    if (runtime.iframeMessageHandler) return;
+    runtime.iframeMessageHandler = (event) => {
+      const data = event && event.data;
+      if (!data || data.type !== READER_IFRAME_MESSAGE || typeof data.token !== 'string') return;
+      const iframe = runtime.readerFrames.get(data.token);
+      if (!iframe || event.source !== iframe.contentWindow) return;
+      const height = Math.min(Math.max(Number(data.height) || 80, 80), 3000);
+      iframe.style.height = `${height}px`;
+    };
+    getHostWindow().addEventListener('message', runtime.iframeMessageHandler);
+  }
+
+  function unbindReaderIframeMessages() {
+    if (!runtime.iframeMessageHandler) return;
+    getHostWindow().removeEventListener('message', runtime.iframeMessageHandler);
+    runtime.iframeMessageHandler = null;
   }
 
   function collectMarkedItems(filterType) {
@@ -678,6 +788,7 @@
   }
 
   function closeReader() {
+    clearReaderFrames();
     const reader = getHostDocument().getElementById(READER_ID);
     if (reader) reader.remove();
     runtime.readerIndex = null;
@@ -722,9 +833,13 @@
     }
 
     runtime.readerIndex = numericIndex;
+    clearReaderFrames();
     reader.innerHTML = buildReaderHtml(numericIndex);
     const content = reader.querySelector('.th-message-marker-reader-content');
-    if (content) content.scrollTop = 0;
+    if (content) {
+      renderReaderFrontendBlocks(content, numericIndex);
+      content.scrollTop = 0;
+    }
     updateFloatingButtonVisibility();
     return reader;
   }
@@ -1186,6 +1301,18 @@
       .th-message-marker-reader-content q::after {
         content: none !important;
       }
+      .th-message-marker-reader-frame-wrap {
+        width: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      .th-message-marker-reader-frame {
+        display: block;
+        width: 100%;
+        height: 480px;
+        border: 0;
+        background: transparent;
+      }
       .th-message-marker-reader-nav {
         display: grid;
         grid-template-columns: minmax(96px, 1fr) auto minmax(96px, 1fr);
@@ -1301,6 +1428,8 @@
     clearTimers();
     if (runtime.observer) runtime.observer.disconnect();
     runtime.observer = null;
+    unbindReaderIframeMessages();
+    clearReaderFrames();
     unbindViewportSync();
     if (runtime.buttonSubscription && typeof runtime.buttonSubscription.stop === 'function') {
       runtime.buttonSubscription.stop();
@@ -1361,6 +1490,7 @@
 
     injectStyle();
     bindViewportSync();
+    bindReaderIframeMessages();
     ensureFloatingButton();
     showLoadedBadge();
     const buttonRegistered = registerTavernHelperButton();
