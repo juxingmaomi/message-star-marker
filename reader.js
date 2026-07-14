@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.3
+// version: reader-v0.1.4
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.3';
+  const SCRIPT_VERSION = 'reader-v0.1.4';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -35,6 +35,7 @@
     buttonSubscription: null,
     readerIndex: null,
     floatingPosition: null,
+    panelPosition: null,
     viewportHandler: null,
     stopping: false,
   };
@@ -481,6 +482,7 @@
     doc.documentElement.style.setProperty('--th-reader-visual-height', `${Math.round(viewport.height)}px`);
     doc.documentElement.style.setProperty('--th-reader-visual-top', `${Math.round(viewport.top)}px`);
     clampFloatingButton(doc.getElementById(FLOATING_BUTTON_ID));
+    applyMarkerPanelPosition(doc.getElementById(PANEL_ID));
   }
 
   function bindViewportSync() {
@@ -581,6 +583,98 @@
     clampFloatingButton(button);
     updateFloatingButtonVisibility();
     return button;
+  }
+
+  function isDesktopPanelDragEnabled() {
+    const host = getHostWindow();
+    return !host.matchMedia || host.matchMedia('(min-width: 701px)').matches;
+  }
+
+  function clampPanelPosition(panel, left, top) {
+    const viewport = getViewportMetrics();
+    const width = panel && panel.offsetWidth || 360;
+    const height = panel && panel.offsetHeight || 320;
+    return {
+      left: Math.min(Math.max(8, left), Math.max(8, viewport.width - width - 8)),
+      top: Math.min(Math.max(viewport.top + 8, top), Math.max(viewport.top + 8, viewport.top + viewport.height - height - 8)),
+    };
+  }
+
+  function applyMarkerPanelPosition(panel) {
+    if (!panel) return;
+    if (!isDesktopPanelDragEnabled()) {
+      panel.style.removeProperty('left');
+      panel.style.removeProperty('top');
+      panel.style.removeProperty('right');
+      panel.style.removeProperty('bottom');
+      return;
+    }
+    if (!runtime.panelPosition) return;
+    runtime.panelPosition = clampPanelPosition(panel, runtime.panelPosition.left, runtime.panelPosition.top);
+    panel.style.left = `${runtime.panelPosition.left}px`;
+    panel.style.top = `${runtime.panelPosition.top}px`;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+  }
+
+  function bindMarkerPanelDrag(panel) {
+    if (!panel || panel.dataset.thReaderPanelDragBound === 'true') return;
+    panel.dataset.thReaderPanelDragBound = 'true';
+    let pointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+    let pendingPosition = null;
+    let frame = null;
+
+    const paint = () => {
+      frame = null;
+      if (!pendingPosition || !panel.isConnected) return;
+      panel.style.left = `${pendingPosition.left}px`;
+      panel.style.top = `${pendingPosition.top}px`;
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    };
+
+    panel.addEventListener('pointerdown', (event) => {
+      if (!isDesktopPanelDragEnabled()) return;
+      const head = event.target && event.target.closest ? event.target.closest('.th-message-marker-panel-head') : null;
+      if (!head || event.target.closest('button')) return;
+      const rect = panel.getBoundingClientRect();
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      startLeft = rect.left;
+      startTop = rect.top;
+      pendingPosition = { left: rect.left, top: rect.top };
+      panel.classList.add('th-message-marker-panel-dragging');
+      panel.setPointerCapture && panel.setPointerCapture(pointerId);
+      event.preventDefault();
+    });
+
+    panel.addEventListener('pointermove', (event) => {
+      if (pointerId == null || event.pointerId !== pointerId || !isDesktopPanelDragEnabled()) return;
+      pendingPosition = clampPanelPosition(panel, startLeft + event.clientX - startX, startTop + event.clientY - startY);
+      if (frame == null) frame = getHostWindow().requestAnimationFrame(paint);
+      event.preventDefault();
+    });
+
+    const finish = (event) => {
+      if (pointerId == null || event.pointerId !== pointerId) return;
+      if (frame != null) {
+        getHostWindow().cancelAnimationFrame(frame);
+        frame = null;
+      }
+      paint();
+      if (pendingPosition) runtime.panelPosition = pendingPosition;
+      panel.releasePointerCapture && panel.releasePointerCapture(pointerId);
+      pointerId = null;
+      panel.classList.remove('th-message-marker-panel-dragging');
+      event.preventDefault();
+    };
+    panel.addEventListener('pointerup', finish);
+    panel.addEventListener('pointercancel', finish);
   }
 
   function closeReader() {
@@ -697,23 +791,29 @@
         } else if (action === 'filter-marker') {
           panel.dataset.filter = actionNode.dataset.filter || 'all';
           panel.innerHTML = buildPanelHtml(panel.dataset.filter);
+          applyMarkerPanelPosition(panel);
         } else if (action === 'open-reader') {
           openReader(actionNode.dataset.index);
         } else if (action === 'remove-marker') {
           setRecordMarker(actionNode.dataset.index, actionNode.dataset.markerType, false);
         }
       });
+      bindMarkerPanelDrag(panel);
       getOverlayMountTarget().appendChild(panel);
     }
     panel.dataset.filter = filterType || panel.dataset.filter || 'all';
     panel.innerHTML = buildPanelHtml(panel.dataset.filter);
+    applyMarkerPanelPosition(panel);
     updateFloatingButtonVisibility();
     return panel;
   }
 
   function refreshOpenPanel() {
     const panel = getHostDocument().getElementById(PANEL_ID);
-    if (panel) panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
+    if (panel) {
+      panel.innerHTML = buildPanelHtml(panel.dataset.filter || 'all');
+      applyMarkerPanelPosition(panel);
+    }
   }
 
   function toggleMarkerPanel() {
@@ -775,7 +875,7 @@
       .th-message-marker-reader-marker.${ACTIVE_CLASS} {
         color: var(--th-marker-active-color);
         opacity: 1;
-        text-shadow: 0 0 5px currentColor;
+        text-shadow: none;
       }
       .${FOOTER_CLASS} {
         display: flex;
@@ -845,7 +945,7 @@
         border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.45));
         border-radius: 8px;
         background: var(--SmartThemeBlurTintColor, rgba(22, 30, 27, 0.97));
-        box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3);
+        box-shadow: none;
         backdrop-filter: blur(var(--SmartThemeBlurStrength, 8px));
       }
       .th-message-marker-panel-head,
@@ -857,6 +957,20 @@
         min-height: 46px;
         padding: 8px 12px;
         border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.28));
+      }
+      @media (min-width: 701px) {
+        .th-message-marker-panel-head {
+          cursor: grab;
+          touch-action: none;
+          user-select: none;
+          -webkit-user-select: none;
+        }
+        #${PANEL_ID}.th-message-marker-panel-dragging .th-message-marker-panel-head {
+          cursor: grabbing;
+        }
+        .th-message-marker-panel-head button {
+          cursor: pointer;
+        }
       }
       .th-message-marker-panel-title {
         font-size: 14px;
@@ -985,7 +1099,7 @@
         border: 1px solid var(--SmartThemeBorderColor, rgba(120, 150, 140, 0.48));
         border-radius: 8px;
         background: var(--SmartThemeBlurTintColor, rgba(22, 30, 27, 0.98));
-        box-shadow: 0 16px 44px rgba(0, 0, 0, 0.42);
+        box-shadow: none;
         backdrop-filter: blur(var(--SmartThemeBlurStrength, 8px));
         pointer-events: auto;
       }
