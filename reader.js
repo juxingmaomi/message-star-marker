@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.6
+// version: reader-v0.1.7
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.6';
+  const SCRIPT_VERSION = 'reader-v0.1.7';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -286,25 +286,42 @@
     const bridge = `<script>(function(){
       const token=${tokenJson};
       let lastHeight=0;
-      const sendHeight=()=>{
-        const root=document.documentElement;
+      let pendingFrame=0;
+      const measureHeight=()=>{
         const body=document.body;
-        const height=Math.ceil(Math.max(
-          root?root.scrollHeight:0,
-          root?root.getBoundingClientRect().height:0,
-          body?body.scrollHeight:0,
-          body?body.getBoundingClientRect().height:0,
-          80
-        ));
+        if(!body)return 80;
+        let marker=document.getElementById('th-reader-content-end');
+        if(!marker){
+          marker=document.createElement('div');
+          marker.id='th-reader-content-end';
+          marker.setAttribute('aria-hidden','true');
+          marker.style.cssText='display:block;clear:both;width:0;height:0;margin:0;padding:0;border:0;';
+          body.appendChild(marker);
+        }
+        const bodyTop=body.getBoundingClientRect().top;
+        const markerBottom=marker.getBoundingClientRect().bottom;
+        return Math.ceil(Math.max(markerBottom-bodyTop,80));
+      };
+      const sendHeight=()=>{
+        pendingFrame=0;
+        const height=measureHeight();
         if(Math.abs(height-lastHeight)<2)return;
         lastHeight=height;
         parent.postMessage({type:${JSON.stringify(READER_IFRAME_MESSAGE)},token,height},'*');
       };
+      const scheduleHeight=()=>{
+        if(pendingFrame)return;
+        pendingFrame=requestAnimationFrame(sendHeight);
+      };
       addEventListener('load',sendHeight);
-      addEventListener('resize',sendHeight);
+      addEventListener('resize',scheduleHeight);
+      document.addEventListener('toggle',()=>{
+        scheduleHeight();
+        [80,240,500].forEach(delay=>setTimeout(sendHeight,delay));
+      },true);
+      document.addEventListener('transitionend',scheduleHeight,true);
       if(typeof ResizeObserver==='function'){
-        const observer=new ResizeObserver(sendHeight);
-        if(document.documentElement)observer.observe(document.documentElement);
+        const observer=new ResizeObserver(scheduleHeight);
         if(document.body)observer.observe(document.body);
       }
       [0,80,240,800,1600].forEach(delay=>setTimeout(sendHeight,delay));
