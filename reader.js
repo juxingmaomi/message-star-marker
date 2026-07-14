@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.8
+// version: reader-v0.1.9
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.8';
+  const SCRIPT_VERSION = 'reader-v0.1.9';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -327,7 +327,7 @@
       [0,80,240,800,1600].forEach(delay=>setTimeout(sendHeight,delay));
     })();</scr` + `ipt>`;
     const headExtras = `<meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style data-th-reader-frame>*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;max-width:100%}img,video,canvas,svg{max-width:100%}</style>`;
+      <style data-th-reader-frame>*,*::before,*::after{box-sizing:border-box}html,body{margin:0;padding:0;max-width:100%;overflow:hidden!important}img,video,canvas,svg{max-width:100%}</style>`;
     let html = String(source || '');
     const hasDocumentShell = /<!doctype\b|<html\b|<head\b|<body\b/i.test(html);
     if (!hasDocumentShell) {
