@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.1.7
+// version: reader-v0.1.8
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.1.7';
+  const SCRIPT_VERSION = 'reader-v0.1.8';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -386,7 +386,8 @@
       if (!data || data.type !== READER_IFRAME_MESSAGE || typeof data.token !== 'string') return;
       const iframe = runtime.readerFrames.get(data.token);
       if (!iframe || event.source !== iframe.contentWindow) return;
-      const height = Math.min(Math.max(Number(data.height) || 80, 80), 3000);
+      const measuredHeight = Math.max(Number(data.height) || 80, 80);
+      const height = Math.min(measuredHeight + 4, 3000);
       iframe.style.height = `${height}px`;
     };
     getHostWindow().addEventListener('message', runtime.iframeMessageHandler);
