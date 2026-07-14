@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.2.3
+// version: reader-v0.2.4
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.2.3';
+  const SCRIPT_VERSION = 'reader-v0.2.4';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -592,7 +592,8 @@
         syncButton(button, record, marker);
       });
     } else if (footer) {
-      footer.remove();
+      footer.querySelectorAll(`.${BUTTON_CLASS}[data-th-marker-placement="bottom"]`).forEach((button) => button.remove());
+      if (!footer.children.length) footer.remove();
     }
   }
 
@@ -1050,7 +1051,9 @@
   function refreshControlsAfterSettings() {
     const doc = getHostDocument();
     doc.querySelectorAll(`.${BUTTON_CLASS}`).forEach((button) => button.remove());
-    doc.querySelectorAll(`.${FOOTER_CLASS}`).forEach((footer) => footer.remove());
+    doc.querySelectorAll(`.${FOOTER_CLASS}`).forEach((footer) => {
+      if (!footer.children.length) footer.remove();
+    });
     const floating = doc.getElementById(FLOATING_BUTTON_ID);
     if (floating) floating.remove();
     scanMessages();
@@ -1676,8 +1679,8 @@
 
   function mutationNodeNeedsScan(node) {
     if (!node || node.nodeType !== 1) return false;
-    if (node.matches('.mes, .mes_block, .mes_header, .mes_buttons, .mes_buttons_container, .mes_controls, .ch_name')) return true;
-    return Boolean(node.querySelector('.mes, .mes_block, .mes_header, .mes_buttons, .mes_buttons_container, .mes_controls, .ch_name'));
+    if (node.matches('.mes, .mes_block, .mes_header, .mes_buttons, .mes_buttons_container, .mes_controls, .ch_name, .th-message-marker-footer')) return true;
+    return Boolean(node.querySelector('.mes, .mes_block, .mes_header, .mes_buttons, .mes_buttons_container, .mes_controls, .ch_name, .th-message-marker-footer'));
   }
 
   function mutationNeedsScan(record, root) {
@@ -1705,7 +1708,9 @@
   function removeOwnedDom() {
     const doc = getHostDocument();
     doc.querySelectorAll(`.${BUTTON_CLASS}`).forEach((node) => node.remove());
-    doc.querySelectorAll(`.${FOOTER_CLASS}`).forEach((node) => node.remove());
+    doc.querySelectorAll(`.${FOOTER_CLASS}`).forEach((node) => {
+      if (!node.children.length) node.remove();
+    });
     [STYLE_ID, BADGE_ID, PANEL_ID, READER_ID, FLOATING_BUTTON_ID].forEach((id) => {
       const node = doc.getElementById(id);
       if (node) node.remove();
