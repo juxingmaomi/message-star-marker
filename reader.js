@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.2.1
+// version: reader-v0.2.2
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.2.1';
+  const SCRIPT_VERSION = 'reader-v0.2.2';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -564,7 +564,7 @@
           if (beforeNode && beforeNode.parentNode === container) container.insertBefore(button, beforeNode);
           else container.appendChild(button);
         }
-        button.textContent = marker.symbol;
+        if (button.textContent !== marker.symbol) button.textContent = marker.symbol;
         button.classList.toggle(`${BUTTON_CLASS}-text`, marker.textual);
         syncButton(button, record, marker);
       });
@@ -587,7 +587,7 @@
           button = createMessageButton(node, marker, 'bottom');
           footer.appendChild(button);
         }
-        button.textContent = marker.symbol;
+        if (button.textContent !== marker.symbol) button.textContent = marker.symbol;
         button.classList.toggle(`${BUTTON_CLASS}-text`, marker.textual);
         syncButton(button, record, marker);
       });
