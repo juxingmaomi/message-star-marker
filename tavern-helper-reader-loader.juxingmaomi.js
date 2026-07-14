@@ -1,6 +1,6 @@
 (async () => {
   const REPO = 'juxingmaomi/message-star-marker';
-  const VERSION = 'reader-v0.2.1';
+  const VERSION = 'reader-v0.2.2';
   const URL = `https://cdn.jsdelivr.net/gh/${REPO}@${VERSION}/reader.js`;
 
   const loaderState = {
