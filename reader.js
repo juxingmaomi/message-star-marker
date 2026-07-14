@@ -1,14 +1,14 @@
 // == TavernHelper Script ==
 // name: 楼层书签阅读器（试验版）
 // author: Codex
-// version: reader-v0.2.2
+// version: reader-v0.2.3
 // description: 为 AI 消息添加四种书签，并在独立浮层中安全阅读单条 AI 回复。
 // ==
 (function () {
   'use strict';
 
   const SCRIPT_NAME = '楼层书签阅读器';
-  const SCRIPT_VERSION = 'reader-v0.2.2';
+  const SCRIPT_VERSION = 'reader-v0.2.3';
   const BUTTON_NAME = '楼层书签阅读器';
   const GLOBAL_INSTANCE_KEY = '__th_message_star_marker_instance_v1__';
   const STYLE_ID = 'th-message-marker-reader-style-v1';
@@ -1674,13 +1674,31 @@
     setTimeout(() => badge.remove(), 5000);
   }
 
+  function mutationNodeNeedsScan(node) {
+    if (!node || node.nodeType !== 1) return false;
+    if (node.matches('.mes, .mes_block, .mes_header, .mes_buttons, .mes_buttons_container, .mes_controls, .ch_name')) return true;
+    return Boolean(node.querySelector('.mes, .mes_block, .mes_header, .mes_buttons, .mes_buttons_container, .mes_controls, .ch_name'));
+  }
+
+  function mutationNeedsScan(record, root) {
+    if (!record || record.type !== 'childList') return false;
+    if (record.target === root) return Array.from(record.addedNodes).some(mutationNodeNeedsScan);
+    const targetElement = record.target && record.target.nodeType === 1 ? record.target : record.target && record.target.parentElement;
+    if (!targetElement || !targetElement.closest('.mes')) return false;
+    if (targetElement.closest(`.${BUTTON_CLASS}, .${FOOTER_CLASS}`)) return false;
+    return Array.from(record.addedNodes).some(mutationNodeNeedsScan)
+      || Array.from(record.removedNodes).some(mutationNodeNeedsScan);
+  }
+
   function installObserver() {
     const root = getChatContainer();
     if (!root) return;
     if (runtime.observer) runtime.observer.disconnect();
     const Observer = getHostWindow().MutationObserver || window.MutationObserver;
     if (!Observer) return;
-    runtime.observer = new Observer(() => scheduleScan(60));
+    runtime.observer = new Observer((records) => {
+      if (records.some((record) => mutationNeedsScan(record, root))) scheduleScan(60);
+    });
     runtime.observer.observe(root, { childList: true, subtree: true });
   }
 
